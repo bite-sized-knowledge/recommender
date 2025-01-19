@@ -1,0 +1,14 @@
+# 텍스트 임베딩 및 사전 학습된 모델
+transformers>=4.22.0
+sentence-transformers>=2.2.2
+
+# 데이터 처리
+numpy>=1.22.0
+pandas>=1.4.0
+
+# 텍스트 전처리
+nltk>=3.7
+spacy>=3.3.0
+
+# 기타 유틸리티
+tqdm>=4.64.0
