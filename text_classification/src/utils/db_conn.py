@@ -33,7 +33,7 @@ class Connection:
                 remote_bind_address=(self.RDS_HOST, self.RDS_PORT),
             )
             self.tunnel.start()
-            print(f"SSH Connected! {self.tunnel.local_bind_address} -> {self.RDS_HOST}:{self.RDS_PORT}")
+            print(f"SSH Connected! {self.tunnel.local_bind_address} -> RDS_HOST:RDS_PORT")
 
             # MySQL 연결
             self.connection = pymysql.connect(
