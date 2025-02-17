@@ -1,0 +1,13 @@
+url	title	category_id	keywords
+https://techblog.woowahan.com/2683	백엔드 개발자의 웹 프론트엔드 개발기 | 우아한형제들 기술블로그	0	웹뷰#react#typescript
+https://tech.kakao.com/posts/454	Techtalk - 음(mm)으로 시작하는 크고 작은 '개발' 이야기 - tech.kakao.com	1	소셜 오디오 서비스#안드로이드#ios
+https://tech.kakao.com/posts/634	효율적인 VMWare 인프라 운영을 위한 최적의 VM 집적도 테스트 - tech.kakao.com	2	vm 집적도#cpu 성능#가상화 기술
+https://tech.kakao.com/posts/659	베네딕트는 왜 이프카카오에서 안성재 성대모사를 했을까? - tech.kakao.com	3	ai 코드리뷰#코드버디#의도
+https://techblog.woowahan.com/9694	우아한형제들 네트워크 인증시스템 교체기 | 우아한형제들 기술블로그	4	네트워크 인증#보안 취약점#역할 기반 접근 제어
+https://techblog.woowahan.com/2576	장애와 관련된 XtraBackup 적용기 | 우아한형제들 기술블로그	5	mariadb#xtrabackup#backup
+https://techblog.woowahan.com/2625	‘Gradle Kotlin DSL’ 이야기 | 우아한형제들 기술블로그	6	gradle#build tool#코틀린 DSL
+https://techblog.woowahan.com/14484	“일단 백로그에 넣어두고 여유 있을 때 보는 걸로 할까요?” : 백로그를 백로그로 두지 않는 법 | 우아한형제들 기술블로그	8	백로그#프로덕트 개선#고객의 목소리
+https://toss.tech/article/ux-research-partner-2	UX 리서처로의 시작과 성장: UX 리서치 파트너 이야기	9	ux 리서치#사용성 테스트#온보딩 프로그램
+https://techblog.woowahan.com/9524	우아콘2022 비하인드: 작은 경험도 괜찮아, 기술로 함께 문제를 풀어가는 이야기 | 우아한형제들 기술블로그	10	콘퍼런스#우아한형제들#경험공유
+https://toss.tech/article/32167	약은 약사에게, 테스트는 토스 닥터에게!	11	
+https://tech.kakao.com/posts/482	if(kakao)2021 - 고민보다?Code Game - tech.kakao.com	7	코드#백신#코비드19
