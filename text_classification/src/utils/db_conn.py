@@ -54,6 +54,15 @@ class Connection:
 
         return pd.read_sql(query, self.connection)
 
+    def _raw_execute(self, query):
+        if not self.connection:
+            raise Exception("There is nothing connection made")
+
+        cursor = self.connection.cursor()
+        cursor.execute(query)
+        self.connection.commit()
+        cursor.close()
+
     def close(self):
         """ 연결 종료 """
         if self.connection:

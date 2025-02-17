@@ -1,0 +1,12 @@
+url	title	category_id	keywords
+https://oliveyoung.tech/2023-06-09/nextjs-image-optimization	NEXT.JS의 이미지 최적화는 어떻게 동작하는가? | 올리브영 테크블로그	0	next.js#이미지 최적화#sharp
+https://medium.com/daangn/%EA%B1%B0%EB%9E%98-%ED%9B%84%EA%B8%B0-%EC%8B%A4%ED%97%98%EC%9D%84-%ED%86%B5%ED%95%B4-%EB%94%B0%EB%9C%BB%ED%95%9C-%EA%B1%B0%EB%9E%98-%EA%B2%BD%ED%97%98-%EB%A7%8C%EB%93%A4%EA%B8%B0-3d7ac18d8e3	거래 후기 실험을 통해 따뜻한 거래 경험 만들기	1	중고거래#거래 후기#유지율
+https://tech.kakao.com/posts/330	개발자를 위한 SSD (Coding for SSD) - Part 5 : 접근 방법과 시스템 최적화 - tech.kakao.com	2	ssd 드라이브#랜덤 쓰기#성능 최적화
+https://tech.kakao.com/posts/520	카카오 AI추천 : 카카오 음악 추천을 경험해보고 싶다면? Melon Playlist Dataset (feats. Kakao Arena) - tech.kakao.com	3	melon playlist dataset#추천 시스템#데이터 분석
+https://oliveyoung.tech/2024-01-23/incident	올리브영은 인시던트를 어떻게 관리하고 있는가? | 올리브영 테크블로그	4	인시던트#정책#csp
+https://techblog.woowahan.com/2633	Spring Boot에서 Repository로 DynamoDB 조작하기 (1) – 설정부터 실행까지 | 우아한형제들 기술블로그	5	dynamodb#mongodb#aws cli
+https://tech.kakao.com/posts/406	if(kakao)2020 코멘터리 01 : 카카오톡 캐싱 시스템의 진화 — Kubernetes와 Redis를 이용한 캐시 팜 구성 - tech.kakao.com	6	쿠버네티스#캐시 시스템#레디스
+https://techblog.woowahan.com/2677	팀 문화의 탄생 | 우아한형제들 기술블로그	8	team culture#kpt#agile
+https://toss.tech/article/toss-design-system-guide	제품이 커지면 디자인 시스템 가이드는 어떻게 개선돼야 할까?	9	디자인 시스템#컴포넌트 가이드#효율적인 제작
+https://tech.kakao.com/posts/365	kakao Tech 개편 안내 - tech.kakao.com	10	카카오#지식 공유#개발자 커뮤니티
+https://toss.tech/article/27314	실수 없이 안전하게 쿠버네티스 운영하기	11	
