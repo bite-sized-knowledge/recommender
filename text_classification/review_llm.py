@@ -37,7 +37,7 @@ def save_response(user, url, title, predicted_topic, rating):
     new_df.to_csv(file_path, sep="\t", index=False)
 
 # ----------------- streamlit UI 구성 -----------------
-st.title("Text Classification 예측 및 응답 저장")x
+st.title("Text Classification 예측 및 응답 저장")
 
 # 사용자 선택 (라디오 버튼)
 selected_user = st.sidebar.radio("사용자 선택", user_list)
