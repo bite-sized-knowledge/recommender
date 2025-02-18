@@ -95,6 +95,12 @@ fi
 if [ -d "$project_folder" ]; then
     cd "$project_folder"
     echo "Moved to folder: $project_folder"
+	echo "Setting up basic folder..."
+	mkdir -p 'config'
+	mkdir -p 'notebook'
+	mkdir -p 'src'
+	cp '../common/requirements.txt' './config/requirements.txt'
+	
 else
     echo "Folder $project_folder does not exist. Exiting."
     exit 1
