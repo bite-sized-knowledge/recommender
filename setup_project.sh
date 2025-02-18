@@ -3,7 +3,7 @@
 # Function to display a cool welcome logo
 show_logo() {
     echo "================================================================================"
-    echo -e "\033[1;32m🚀 $1 🚀\033[0m"  # Green color for the project name
+    echo "\033[1;32m🚀 $1 🚀\033[0m"  # Green color for the project name
     echo "================================================================================"
     echo " ____  _ _          _____ _             _   _____           _           _      "
     echo "|  _ \(_) |        / ____(_)           | | |  __ \         (_)         | |     "
@@ -15,7 +15,7 @@ show_logo() {
     echo "                                                        |__/                   "
     echo "================================================================================"
     echo
-    echo -e "\033[1;32m🌟 $2 🌟\033[0m"  # Green color for the project name
+    echo "\033[1;32m🌟 $2 🌟\033[0m"  # Green color for the project name
     echo
     sleep 1
 }
@@ -64,28 +64,32 @@ if ! check_conda_installed; then
 else
     echo "Conda is already installed."
     export PATH="$HOME/.miniconda3/bin:$PATH" # Ensure PATH is set
-    conda init
-    source ~/.bashrc
 fi
 
 # Step 3: Provide options for moving to the project folder
+folders=($(find . -maxdepth 1 -type d ! -name "." ! -name ".*" | sed 's|./||'))
+
+# Display folder options
 echo "Select a project folder to navigate to:"
-echo "1. text_classification"
-echo "2. etc"
+for i in "${!folders[@]}"; do
+    echo "$(($i + 1)). ${folders[$i]}"
+done
+echo "$(($i + 2)). Create a new folder"
+
+# Get user choice
 read -p "Enter the number corresponding to your choice: " choice
 
-case $choice in
-    1)
-        project_folder="text_classification"
-        ;;
-    2)
-        project_folder="etc"
-        ;;
-    *)
-        echo "Invalid choice. Exiting."
-        exit 1
-        ;;
-esac
+# Check if the choice is valid
+if [[ "$choice" -ge 1 && "$choice" -le "${#folders[@]}" ]]; then
+    project_folder="${folders[$((choice - 1))]}"
+elif [[ "$choice" -eq "$((${#folders[@]} + 1))" ]]; then
+    read -p "Enter the name of the new folder: " project_folder 
+    mkdir -p "$project_folder"
+    echo "Folder '$new_folder' created."
+else
+    echo "Invalid choice. Exiting."
+    exit 1
+fi
 
 # Navigate to the selected project folder
 if [ -d "$project_folder" ]; then
