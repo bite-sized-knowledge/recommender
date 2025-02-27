@@ -5,25 +5,40 @@ instruction: "Extract the desired information from the following passage"
 guidelines:
   focusing:
     instruction: "Choose the most relevant topic from the given categories"
-    categories: "['web','mobile(android, ios) engineering', 'hardware & iot','ai & ml & data','security & network','db','devops & infra','game','product manager','design','etc','n/a']"
+    categories:
+      - "Frontend"
+      - "Backend"
+      - "Mobile Engineering"
+      - "AI / ML"
+      - "Database"
+      - "Security / Network"
+      - "Design"
+      - "Product Manager"
+      - "DevOps / Infra"
+      - "Hardware / IoT"
+      - "QA / Test Engineer"
+      - "Culture"
     fallback: 
-      - "If not primarily focused on a specific technical topic, classify as 'etc'"
-      - "If the content is too short to determine the main topic, classify as 'N/A'" 
+      - "If none of the above categories match the text, or the probability is significantly lower, don't force yourself to choose a category and categorize it as 'etc'."
+      - "If there is no body content or the length is too short to categorize, please don't try to force a categorization and categorize it as “N/A"
 
   keywords:
     count: 3
     instructions:
-      - "Extract exactly 3 keywords or phrase that best represent the main content"
-      - "Ensure keywords are directly related to the main topic or event"
-      - "Try to extract keywords that are technical or specific to the content"
-      - "Try to extract specific technical domain of the content"
-      - "If possible, extract the keyword in Korean(but it doesn't mean translate),and if in English, extract it in lowercase."
-      - "Try to avoid duplicate keywords by meaning"
+      - "Extract exactly 3 technical keywords or phrases that best represent the core technical content"
+      - "Ensure keywords are directly related to the main technical topic, technology, or methodology discussed"
+      - "Focus on specific technical terms, frameworks, programming languages, or technical concepts central to the content"
+      - "Identify and extract the primary technical domain or field of the content"
+      - "If available, extract Korean technical terms; otherwise, use lowercase English technical terms"
+      - "Ensure each keyword is unique in meaning and relevance to the technical subject"
+      - "Prioritize keywords that would be most useful for categorizing or searching technical content"
     exclusions:
       - "Corporate names"
       - "Product names"
-      - "Irrelevant information"
-    fallback: "If no relevant keywords can be extracted because of the length of the content, use 'etc'"
+      - "Non-technical terms or general concepts"
+      - "Metadata or formatting information"
+      - "Irrelevant or peripheral information"
+    fallback: "If no relevant technical keywords can be extracted due to content limitations, use 'etc'"
 
   content_length:
     instruction: "Count and report the number of characters in the main content"
