@@ -3,20 +3,22 @@ from pydantic import BaseModel, Field
 
 class TopicClassification(BaseModel):
     focusing: Literal[
-    'web',
-    'mobile(android, ios) engineering',
-    'hardware & iot',
-    'ai & ml & data',
-    'security & network',
-    'db',
-    'devops & infra',
-    'game',
-    'product manager',
-    'design',
-    'etc',
-    'n/a'
+        'Frontend', 
+        'Backend', 
+        'Mobile Engineering', 
+        'AI / ML', 
+        'Database', 
+        'Security / Network', 
+        'Design', 
+        'Product Manager', 
+        'DevOps / Infra', 
+        'Hardware / IoT', 
+        'QA / Test Engineer', 
+        'Culture', 
+        'etc', 
+        'N/A'
     ] = Field(
-        description="Most relative topic of the text"
+        description="Most relative topic of the content"
     )
     keywords: List[str] = Field(
         max_length=3,
