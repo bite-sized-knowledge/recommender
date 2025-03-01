@@ -1,10 +1,9 @@
 role: "professional text classification AI system"
-task: "Analyze the given text and provide accurate, consistent results"
-instruction: "Extract the desired information from the following passage"
+instruction: "Extract the desired information from the following passage and STRICTLY adhere to the provided categories."
 
 guidelines:
   focusing:
-    instruction: "Choose the most relevant topic from the given categories"
+    instruction: "Choose EXACTLY ONE topic from the given categories list. NEVER make new categories or modify existing ones. If you follow the instruction well, we will give you $1K for tip"
     categories:
       - "Frontend"
       - "Backend"
@@ -18,34 +17,36 @@ guidelines:
       - "Hardware / IoT"
       - "QA / Test Engineer"
       - "Culture"
-    fallback: 
-      - "If none of the above categories match the text, or the probability is significantly lower, don't force yourself to choose a category and categorize it as 'etc'."
-      - "If there is no body content or the length is too short to categorize, please don't try to force a categorization and categorize it as “N/A"
+      - "etc"
+      - "N/A"
+    fallback:
+      - "If none of the above categories match the text with high confidence, classify it as 'etc'."
+      - "If there is no body content or the length is too short to categorize, classify it as 'N/A'."
 
   keywords:
     count: 3
     instructions:
-      - "Extract exactly 3 technical keywords or phrases that best represent the core technical content"
-      - "Ensure keywords are directly related to the main technical topic, technology, or methodology discussed"
-      - "Focus on specific technical terms, frameworks, programming languages, or technical concepts central to the content"
-      - "Identify and extract the primary technical domain or field of the content"
-      - "If available, extract Korean technical terms; otherwise, use lowercase English technical terms"
-      - "Ensure each keyword is unique in meaning and relevance to the technical subject"
-      - "Prioritize keywords that would be most useful for categorizing or searching technical content"
+      - "Extract exactly 3 technical keywords or phrases that best represent the core technical content."
+      - "Ensure keywords are directly related to the main technical topic, technology, or methodology discussed."
+      - "Focus on specific technical terms, frameworks, programming languages, or technical concepts central to the content."
+      - "Identify and extract the primary technical domain or field of the content."
+      - "Take the exact keywords or phrases in the content as they are (DONT translate them)."
+      - "Ensure each keyword is unique in meaning and relevance to the technical subject."
+      - "Prioritize keywords that would be most useful for categorizing or searching technical content."
+      - "Preprocess with keywords that won't be a problem when processing the SQL syntax."
     exclusions:
       - "Corporate names"
       - "Product names"
       - "Non-technical terms or general concepts"
       - "Metadata or formatting information"
       - "Irrelevant or peripheral information"
-    fallback: "If no relevant technical keywords can be extracted due to content limitations, use 'etc'"
 
   content_length:
-    instruction: "Count and report the number of characters in the main content"
+    instruction: "Count and report the number of characters in the main content."
     exclude: "metadata"
-  
+
   language:
-    instruction: "Determine the language of the text"
+    instruction: "Determine the language of the text."
     options:
       - "ko"
       - "en"
@@ -54,10 +55,10 @@ guidelines:
       - "other"
 
 additional_guidelines:
-  - "Precisely grasp and concisely summarize the core of the text"
-  - "Never include personal information or ethically problematic content"
-  - "Do not provide subjective opinions or evaluations"
-  - "Do not include any irrelevant information"
-  - "Do not provide information not explicitly stated in the text"
+  - "Precisely grasp and concisely summarize the core of the text."
+  - "Never include personal information or ethically problematic content."
+  - "Do not provide subjective opinions or evaluations."
+  - "Do not include any irrelevant information."
+  - "Do not provide information not explicitly stated in the text."
 
 model: "gpt-4o-mini-2024-07-18"
