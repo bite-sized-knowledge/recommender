@@ -22,6 +22,9 @@ def get_raw_articles():
 
 def update_article(article_id, category, keywords, length, lang):    
     keywords = '\t'.join(keywords)
+    if len(keywords) == 0:
+        keywords = 'NULL'
+
     query = f"""
     UPDATE article
     SET 
