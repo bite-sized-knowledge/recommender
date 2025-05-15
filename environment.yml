@@ -1,0 +1,26 @@
+name: recommender
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - scikit-learn
+  - tqdm
+  - jupyter
+  - pip:
+      - torch
+      - --extra-index-url https://download.pytorch.org/whl/cu118
+      - polars
+      - colorlog
+      - awscli
+      - boto3
+      - paramiko
+      - pymysql
+      - sqlalchem
+      - python-dotenv
+      - gensim
+      - pyyaml
+      - pyarrow

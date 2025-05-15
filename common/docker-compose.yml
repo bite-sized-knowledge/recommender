@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: bite-local
+      MYSQL_USER: user
+      MYSQL_PASSWORD: 1234
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  dynamodb:
+    image: amazon/dynamodb-local
+    container_name: dynamodb
+    ports:
+      - "9000:8000"
+    volumes:
+      - dynamodb_data:/home/dynamodblocal
+
+volumes:
+  mysql_data:
+  dynamodb_data:

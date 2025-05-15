@@ -1,0 +1,14 @@
+# config.yml
+
+emb_model:
+  path: ~/projects/fasttext.bin        # PyTorch 모델 또는 경로
+  similarity_metric: cosine             # or: dot, euclidean
+
+batch:
+  user_filter_days: 7                    # 최근 7일간 활동 사용자
+  min_interactions: 3                   # 최소 조회 수
+  max_candidates: 200
+
+logging:
+  level: INFO
+  log_path: /app/logs/reco.log
