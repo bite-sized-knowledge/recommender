@@ -19,8 +19,9 @@ dependencies:
       - boto3
       - paramiko
       - pymysql
-      - sqlalchem
+      - sqlalchemy
       - python-dotenv
       - gensim
       - pyyaml
       - pyarrow
+      - compress-fasttext>=0.1.0
