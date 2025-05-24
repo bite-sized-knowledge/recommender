@@ -22,7 +22,6 @@ class Connection:
                 f"mysql+pymysql://{self.RDS_USER}:{self.RDS_PASSWORD}" 
                 f"@{self.RDS_HOST}:{self.RDS_PORT}/{self.RDS_DATABASE}"
             )
-            print("SQLAlchemy Engine Connected!")
 
         except Exception as e:
             print("Error occurred:", e)
@@ -58,7 +57,6 @@ class Connection:
             print(f"Dynamo Connection Failed : {e}")
             return
 
-        print("Dynamo connected")
         return _dynamo_resource
 
     def close(self):

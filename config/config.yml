@@ -1,7 +1,7 @@
 # config.yml
 
 emb_model:
-  path: ~/projects/fasttext.bin        # PyTorch 모델 또는 경로
+  path: https://zenodo.org/records/4905385/files/fasttext-ko-mini?download=1
   similarity_metric: cosine             # or: dot, euclidean
 
 batch:

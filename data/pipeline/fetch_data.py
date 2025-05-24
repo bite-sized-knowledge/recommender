@@ -1,21 +1,174 @@
+import os
+import random
 import polars as pl
-from decimal import Decimal
-from datetime import datetime, timedelta, timezone
-from boto3.dynamodb.conditions import Key
+from typing import List, Dict, Set, Tuple, Any
+from collections import defaultdict
+from boto3.dynamodb.conditions import Key, Attr
+from datetime import datetime, timezone, timedelta
+from utils.logger import get_logger
 
 
-def fetch_articles_to_parquet(conn):
+# -----------------------------
+# Popularity 기반 후보군 생성
+# -----------------------------
+def generate_popularity_candidates(
+    days: int = 14,
+    top_k: int = 50,
+    weights: Dict[str, float] = {
+        "like": 3.0,
+        "share": 2.0,
+        "bookmark": 1.5,
+    }
+) -> List[str]:
+    """인기 있는 상위 K개의 아티클 ID를 생성합니다."""
+    print()
+    logger = get_logger(f"Generate Popular Top-{top_k}")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+
+    logger.info("Caculating Popularity...")
+
+    df = (
+        pl.scan_parquet("data/raw/articles.parquet")
+        .filter(pl.col("created_at") >= since)
+        .select([
+            "article_id",
+            (pl.col("like_count") * weights["like"]).alias("like_score"),
+            (pl.col("share_count") * weights["share"]).alias("share_score"),
+            (pl.col("bookmark_count") * weights["bookmark"]).alias("bookmark_score")
+        ])
+        .with_columns([
+            (pl.col("like_score") + pl.col("share_score") + pl.col("bookmark_score")).alias("popularity_score")
+        ])
+        .sort("popularity_score", descending=True)
+        .select("article_id")
+        .limit(top_k)
+        .collect()
+    )
+
+    return df["article_id"].to_list()
+
+# -----------------------------
+# category_id → article_id mapping
+# -----------------------------
+def fetch_category_id_articles() -> Dict[int, Set[str]]:
+    """카테고리 ID별로 매핑된 아티클 ID를 반환합니다."""
+    df = pl.read_parquet("data/raw/articles.parquet")
+
+    category_map = (
+        df.group_by("category_id")
+        .agg(pl.col("article_id"))
+        .to_dict(as_series=False) 
+    )
+
+    return {
+        cat_id: set(article_ids)
+        for cat_id, article_ids in zip(category_map["category_id"], category_map["article_id"])
+    }
+
+
+
+# -----------------------------
+# 전체 article_id 목록 추출
+# -----------------------------
+def fetch_all_article_ids() -> Set[str]:
+    """RDB에서 전체 article_id 집합을 조회합니다."""
+    df = pl.read_parquet("data/raw/articles.parquet")
+    return set(df["article_id"])
+
+
+# -----------------------------
+# Positive + Negative 학습 샘플 생성
+# -----------------------------
+def generate_training_samples(
+    user_positive_map: Dict[int, Set[str]],
+    negative_ratio: int = 5,
+    seed: int = 42
+) -> List[Tuple[int, str, int]]:
+    """Positive 로그와 전체 아티클 pool을 기반으로 negative 샘플을 생성합니다."""
+    print()
+    logger = get_logger("Generate Training Datasets")
+    random.seed(seed)
+
+    all_article_ids = fetch_all_article_ids()
+    dataset = []
+
+    logger.info("Creating Dataset using negative samples...")
+    for user_id, pos_articles in user_positive_map.items():
+        dataset.extend([(user_id, aid, 1) for aid in pos_articles])
+
+        neg_pool = list(all_article_ids - pos_articles)
+        sampled_negatives = random.sample(neg_pool, min(len(pos_articles) * negative_ratio, len(neg_pool)))
+        dataset.extend([(user_id, aid, 0) for aid in sampled_negatives])
+
+    return dataset
+
+
+# -----------------------------
+# Positive 로그 추출 from DynamoDB
+# -----------------------------
+def fetch_positive_logs(
+    conn: Any,
+    start_ts: int,
+    end_ts: int
+) -> Dict[int, Set[str]]:
+    """DynamoDB에서 positive event 로그를 조회하여 유저별로 본 아티클 ID 집합을 반환합니다."""
+    dynamo = conn.get_dynamo()
+    table = dynamo.Table("event")
+
+    query = conn.execute("SELECT DISTINCT member_id FROM member")
+    member_ids = list(query["member_id"])
+
+    POSITIVE_EVENTS = {"article_in", "like", "archive", "share"}
+    TARGET_TYPE = "article"
+
+    user_article_map = defaultdict(set)
+    for member_id in member_ids:
+        last_evaluated_key = None
+        while True:
+            query_kwargs = {
+                "KeyConditionExpression": Key("member_id").eq(member_id) & Key("timestamp").between(start_ts, end_ts),
+                "FilterExpression": Attr("target_type").eq(TARGET_TYPE) & Attr("event_type").is_in(POSITIVE_EVENTS),
+                "ProjectionExpression": "target_id"
+            }
+            if last_evaluated_key:
+                query_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+            response = table.query(**query_kwargs)
+            for item in response.get("Items", []):
+                article_id = convert_decimal_fields(item).get("target_id")
+                if article_id:
+                    user_article_map[member_id].add(article_id)
+
+            last_evaluated_key = response.get("LastEvaluatedKey")
+            if not last_evaluated_key:
+                break
+
+    return user_article_map
+
+
+# -----------------------------
+# Decimal 변환 유틸
+# -----------------------------
+def convert_decimal_fields(item: dict) -> dict:
+    """DynamoDB에서 반환된 Decimal 필드를 Python의 int/float로 변환합니다."""
+    from decimal import Decimal
+    return {
+        k: int(v) if isinstance(v, Decimal) and v % 1 == 0 else float(v) if isinstance(v, Decimal) else v
+        for k, v in item.items()
+    }
+
+def fetch_articles_to_parquet(conn: Any, output_path: str = "data/raw/articles.parquet") -> None:
     """
-    Fetch articles from the RDS database and save them as a compressed Parquet file.
-    This function filters out articles that have null values in `category_id` or `keywords`.
+    RDS에서 Content Based Embedding을 위해 전체 article 데이터를 parquet으로 저장합니다.
 
     Args:
-        conn: A database connection object.
-
-    Returns:
-        None. The result is saved to 'data/raw/articles.parquet'.
+        conn (Any): pymysql 커넥션
+        output_path (str): 저장할 parquet 파일 경로
     """
-    df = conn.execute("""
+    print()
+    logger = get_logger("Fetch Articles")
+
+    query = """
         SELECT  
             article_id,
             blog_id,
@@ -24,79 +177,23 @@ def fetch_articles_to_parquet(conn):
             category_id,
             keywords,
             content_length,
-            lang
+            like_count,
+            share_count,
+            bookmark_count,
+            lang,
+            created_at
         FROM article
         WHERE category_id IS NOT NULL
-          AND keywords IS NOT NULL
-    """)
-
-    print("Saving Articles to data/raw/articles.parquet ...")
-    df.write_parquet("data/raw/articles.parquet", compression="zstd")
-
-
-def convert_decimal_fields(item):
+        AND keywords IS NOT NULL
     """
-    Convert all Decimal fields in a dictionary to integers (used for DynamoDB data).
 
-    Args:
-        item (dict): A dictionary representing a DynamoDB item.
+    logger.info("Fetching article data from DB...")
+    df = conn.execute(query)
 
-    Returns:
-        dict: The same dictionary with Decimal fields converted to integers.
-    """
-    return {
-        k: int(v) if isinstance(v, Decimal) else v for k, v in item.items()
-    }
+    if not isinstance(df, pl.DataFrame):
+        df = pl.DataFrame(df.fetchall(), schema=[col[0] for col in df.description])
 
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-def fetch_events_to_parquet(conn):
-    """
-    Fetch 'like', 'blog_in', and 'archive' events from the last 3 days from DynamoDB,
-    deduplicate them, and save to a compressed Parquet file.
-
-    Deduplication is based on (member_id, target_id, event_type) triplets.
-
-    Args:
-        conn: An object with a `get_dynamo()` method that returns a boto3 DynamoDB resource.
-
-    Returns:
-        None. The result is saved to 'data/raw/events.parquet'.
-    """
-    dynamo = conn.get_dynamo()
-    table = dynamo.Table("event")
-
-    three_days_ago = int((datetime.now(timezone.utc) - timedelta(days=3)).timestamp())
-    all_events = []
-    seen = set()
-
-    for event_type in ["like", "blog_in", "archive"]:
-        last_evaluated_key = None
-        while True:
-            query_params = {
-                "IndexName": "event_type-timestamp-index",
-                "KeyConditionExpression": Key("event_type").eq(event_type) & Key("timestamp").gte(three_days_ago),
-            }
-            if last_evaluated_key:
-                query_params["ExclusiveStartKey"] = last_evaluated_key
-
-            response = table.query(**query_params)
-            items = response.get("Items", [])
-
-            for item in items:
-                item = convert_decimal_fields(item)
-                key = (item.get("member_id"), item.get("target_id"), item.get("event_type"))
-                if key not in seen:
-                    seen.add(key)
-                    all_events.append({
-                        "member_id": item.get("member_id"),
-                        "article_id": item.get("target_id"),
-                        "event_type": item.get("event_type")
-                    })
-
-            last_evaluated_key = response.get("LastEvaluatedKey", None)
-            if not last_evaluated_key:
-                break
-
-    df = pl.DataFrame(all_events)
-    print("Saving Events to data/raw/events.parquet ...")
-    df.write_parquet("data/raw/events.parquet", compression="zstd")
+    logger.info(f"Saving {df.shape[0]} articles to {output_path}")
+    df.write_parquet(output_path, compression="zstd")
