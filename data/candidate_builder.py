@@ -14,12 +14,14 @@ class CandidateBuilder:
     """
     def __init__(
             self, 
+            process_dir: str,
             output_dir: str,
             conn: Any,
             config: Dict[str, str],
             train: bool = True
         ):
 
+        self.process_dir = process_dir
         self.output_dir = output_dir
         self.conn = conn
         self.config = config
@@ -33,6 +35,7 @@ class CandidateBuilder:
     def prepare(self):
         """ 시간 범위 설정 """
         self.logger.info("Preparing...")
+        os.makedirs(self.process_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
         now = datetime.now()
 
@@ -79,12 +82,21 @@ class CandidateBuilder:
             "popular_top_50.parquet"
         )
 
+        # User-Item 코사인 유사도 계산
+        generate_sim_candidates(
+            n_rows=100,
+            preferred_map=build_preferred_category_map(
+                self.conn,
+                self.user_positive_map
+            )
+        )
+
 
     def _save_to_file(self, data, file_name):
         """
         데이터를 파일에 저장합니다.
         """
-        file_path = os.path.join(self.output_dir, file_name)
+        file_path = os.path.join(self.process_dir, file_name)
         np.save(file_path, data)
 
     def _save_to_parquet(self, data: Any, columns: List[str], file_name: str) -> None:
@@ -97,7 +109,7 @@ class CandidateBuilder:
             file_name (str): 저장할 파일명 (예: candidates.parquet)
         """
         # data 형태에 따라 처리 분기
-        file_path = os.path.join(self.output_dir, file_name)
+        file_path = os.path.join(self.process_dir, file_name)
 
         if data is None:
             self.logger("No Data Fetched...")

@@ -2,7 +2,7 @@ import os
 import random
 import polars as pl
 from typing import List, Dict, Set, Tuple, Any
-from collections import defaultdict
+from collections import defaultdict, Counter
 from boto3.dynamodb.conditions import Key, Attr
 from datetime import datetime, timezone, timedelta
 from utils.logger import get_logger
@@ -102,6 +102,14 @@ def generate_training_samples(
 
     return dataset
 
+# -----------------------------
+# 최근 3일 간 조회했던 게시글 조회
+# -----------------------------
+def fetch_recently_viewed_articles(conn: Any, days: int = 3) -> Dict[int, Set[str]]:
+    end_ts = int(datetime.now().timestamp() * 1000)
+    start_ts = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+    return fetch_positive_logs(conn, start_ts, end_ts, positive_events={"article_in"})
+
 
 # -----------------------------
 # Positive 로그 추출 from DynamoDB
@@ -109,7 +117,8 @@ def generate_training_samples(
 def fetch_positive_logs(
     conn: Any,
     start_ts: int,
-    end_ts: int
+    end_ts: int,
+    positive_events = {"article_in", "like", "archive", "share"}
 ) -> Dict[int, Set[str]]:
     """DynamoDB에서 positive event 로그를 조회하여 유저별로 본 아티클 ID 집합을 반환합니다."""
     dynamo = conn.get_dynamo()
@@ -118,7 +127,6 @@ def fetch_positive_logs(
     query = conn.execute("SELECT DISTINCT member_id FROM member")
     member_ids = list(query["member_id"])
 
-    POSITIVE_EVENTS = {"article_in", "like", "archive", "share"}
     TARGET_TYPE = "article"
 
     user_article_map = defaultdict(set)
@@ -127,7 +135,7 @@ def fetch_positive_logs(
         while True:
             query_kwargs = {
                 "KeyConditionExpression": Key("member_id").eq(member_id) & Key("timestamp").between(start_ts, end_ts),
-                "FilterExpression": Attr("target_type").eq(TARGET_TYPE) & Attr("event_type").is_in(POSITIVE_EVENTS),
+                "FilterExpression": Attr("target_type").eq(TARGET_TYPE) & Attr("event_type").is_in(positive_events),
                 "ProjectionExpression": "target_id"
             }
             if last_evaluated_key:
@@ -197,3 +205,57 @@ def fetch_articles_to_parquet(conn: Any, output_path: str = "data/raw/articles.p
 
     logger.info(f"Saving {df.shape[0]} articles to {output_path}")
     df.write_parquet(output_path, compression="zstd")
+
+def build_preferred_category_map(
+    conn: Any,
+    user_positive_map: Dict[int, Set[str]],
+    article_category_path: str = "data/raw/articles.parquet",
+    top_n: int = 5
+) -> Dict[int, Set[int]]:
+    """
+    유저별로 선호 카테고리 ID를 구성 (회원가입 시 선택 + 최근 행동 기반).
+
+    Args:
+        conn (Any): DB connection (for member_interest)
+        user_positive_map (Dict[int, Set[str]]): 유저별 본 article_id 집합
+        article_category_path (str): article_id → category_id 포함 parquet 경로
+        top_n (int): 행동 기반 상위 카테고리 수
+
+    Returns:
+        Dict[int, Set[int]]: 유저별 선호 category_id 집합
+    """
+
+    # 1. article_id → category_id mapping
+    df = pl.read_parquet(article_category_path).select(["article_id", "category_id"])
+    article_to_cat = dict(zip(df["article_id"], df["category_id"]))
+
+    # 2. DB에서 member_interest 테이블 조회
+    query = "SELECT member_id, interest_id FROM member_interest"
+    result = conn.execute(query)
+    member_interest_map: Dict[int, Set[int]] = defaultdict(set)
+    for row in result.iter_rows(named=True):
+        member_id, interest_id = row['member_id'], row['interest_id']
+        if member_id and interest_id:
+            member_interest_map[member_id].add(int(interest_id))
+
+    # 3. 각 유저별 preferred category 구성
+    preferred_map = {}
+
+    for user_id, article_ids in user_positive_map.items():
+        cat_counter = Counter()
+        for aid in article_ids:
+            cat = article_to_cat.get(aid)
+            if cat is not None:
+                cat_counter[cat] += 1
+
+        # 행동 기반: 최근 본 카테고리 상위 N개
+        top_categories = [cat for cat, _ in cat_counter.most_common(top_n)]
+
+        # 가입 기반: DB에서 선택한 관심사
+        selected_interests = member_interest_map.get(user_id, set())
+
+        # 합집합 → 전체 선호 category
+        preferred = set(top_categories) | selected_interests
+        preferred_map[user_id] = preferred
+
+    return preferred_map

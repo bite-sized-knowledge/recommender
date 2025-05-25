@@ -1,6 +1,9 @@
 import polars as pl
+import numpy as np
 from pathlib import Path
 from utils.logger import get_logger
+from typing import List, Dict, Set, Tuple, Any
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 def update_embeddings(embedder):
@@ -38,10 +41,11 @@ def update_embeddings(embedder):
 
     logger.info("Generating new embeddings...")
     records = []
-    for article_id, sentence in zip(df["article_id"].to_list(), texts):
+    for article_id, category_id, sentence in zip(df["article_id"].to_list(), df["category_id"], texts):
         vec = embedder.get_vector_from_text(sentence)
         records.append({
             "article_id": article_id,
+            "category_id": category_id,
             **{f"dim_{i}": vec[i] for i in range(len(vec))}
         })
 
@@ -125,3 +129,57 @@ def generate_category_embedding(category_article_map):
     
     logger.info(f"Saving category_id embeddings...")
     pl.DataFrame(category_id_vector).write_parquet(CATEGORY_EMBED_PATH, compression="zstd")
+
+def generate_sim_candidates(
+    n_rows: int,
+    preferred_map: Dict[int, Set[int]],
+    boost_factor: float = 1.2
+):
+
+    USER_EMBED_PATH = Path("data/processed/user_embeddings.parquet")
+    ITEM_EMBED_PATH = Path("data/processed/item_embeddings.parquet")
+    CANDIDATE_PATH = Path("data/candidates/user_item_sim.parquet")
+    logger = get_logger("Calculate User-Item Cosine Similarity")
+
+
+    print()
+    logger.info("Loading embeddings...")
+    users = pl.read_parquet(USER_EMBED_PATH)
+    items = pl.read_parquet(ITEM_EMBED_PATH)
+
+    if "category_id" not in items.columns:
+        raise ValueError("item_embeddings.parquet 파일에 'category_id' 컬럼이 필요합니다.")
+
+    user_ids = users["member_id"].to_list()
+    article_ids = items["article_id"].to_list()
+    item_categories = items["category_id"].to_list()
+
+    user_vectors = users.select([col for col in users.columns if col.startswith("dim_")]).to_numpy()
+    item_vectors = items.select([col for col in items.columns if col.startswith("dim_")]).to_numpy()
+
+    logger.info("Calculating cosine similarity...")
+    sims = cosine_similarity(user_vectors, item_vectors)  # (num_users, num_items)
+
+    logger.info("Applying preference-based boost...")
+    for user_idx, member_id in enumerate(user_ids):
+        preferred_categories = preferred_map.get(member_id, set())
+        for item_idx, category_id in enumerate(item_categories):
+            if category_id in preferred_categories:
+                sims[user_idx][item_idx] *= boost_factor
+
+    logger.info("Sorting top-K for each user...")
+    top_k_indices = np.argsort(-sims, axis=1)[:, :n_rows]  # 상위 K개 인덱스
+
+    logger.info("Building candidate list...")
+    rows = []
+    for user_idx, member_id in enumerate(user_ids):
+        for rank, item_idx in enumerate(top_k_indices[user_idx]):
+            rows.append({
+                "member_id": member_id,
+                "article_id": article_ids[item_idx],
+                "score": float(sims[user_idx][item_idx]),
+                "source": "embedding_sim",
+                "rank": rank + 1
+            })
+
+    pl.DataFrame(rows).write_parquet(CANDIDATE_PATH, compression="zstd")
