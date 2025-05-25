@@ -49,6 +49,10 @@ class CandidateBuilder:
            
         self.user_positive_map = fetch_positive_logs(self.conn, start_ts, end_ts)
         self.all_article_ids = fetch_all_article_ids()
+        self.preferred_map = build_preferred_category_map(
+            self.conn, 
+            self.user_positive_map
+        )
    
 
     def process_and_save(self):
@@ -75,20 +79,22 @@ class CandidateBuilder:
         )
 
         # 인기 아티클 저장 
-        popularity_articles = generate_popularity_candidates(days=14)
+        popularity_articles = generate_personalized_popularity_candidates(
+            self.preferred_map,
+            days=14
+        )
+
         self._save_to_parquet(
             popularity_articles, 
-            ["article_id"],
-            "popular_top_50.parquet"
+            ["member_id", "article_id", "score", "source", "rank"],
+            "personal_popular.parquet",
+            candidate=True
         )
 
         # User-Item 코사인 유사도 계산
         generate_sim_candidates(
             n_rows=100,
-            preferred_map=build_preferred_category_map(
-                self.conn,
-                self.user_positive_map
-            )
+            preferred_map=self.preferred_map
         )
 
 
@@ -99,7 +105,7 @@ class CandidateBuilder:
         file_path = os.path.join(self.process_dir, file_name)
         np.save(file_path, data)
 
-    def _save_to_parquet(self, data: Any, columns: List[str], file_name: str) -> None:
+    def _save_to_parquet(self, data: Any, columns: List[str], file_name: str, candidate=False) -> None:
         """
         데이터를 Parquet 형식으로 저장합니다 (Polars 기반).
 
@@ -109,7 +115,10 @@ class CandidateBuilder:
             file_name (str): 저장할 파일명 (예: candidates.parquet)
         """
         # data 형태에 따라 처리 분기
-        file_path = os.path.join(self.process_dir, file_name)
+        if not candidate:
+            file_path = os.path.join(self.process_dir, file_name)
+        else:
+            file_path = os.path.join(self.output_dir, file_name)
 
         if data is None:
             self.logger("No Data Fetched...")

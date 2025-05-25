@@ -11,7 +11,8 @@ from utils.logger import get_logger
 # -----------------------------
 # Popularity 기반 후보군 생성
 # -----------------------------
-def generate_popularity_candidates(
+def generate_personalized_popularity_candidates(
+    preferred_map: Dict[int, Set[int]],
     days: int = 14,
     top_k: int = 50,
     weights: Dict[str, float] = {
@@ -19,19 +20,23 @@ def generate_popularity_candidates(
         "share": 2.0,
         "bookmark": 1.5,
     }
-) -> List[str]:
-    """인기 있는 상위 K개의 아티클 ID를 생성합니다."""
-    print()
-    logger = get_logger(f"Generate Popular Top-{top_k}")
+) -> List[Dict]:
+    """
+    유저별 선호 카테고리 기반 개인화된 인기 아티클을 생성하여 저장 포맷으로 반환
+
+    Returns:
+        List[Dict]: member_id, article_id, score, source, rank 형식
+    """
+    logger = get_logger("Generate Personalized Popularity")
+    logger.info("Loading recent articles...")
+
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
 
-    logger.info("Caculating Popularity...")
-
     df = (
-        pl.scan_parquet("data/raw/articles.parquet")
+        pl.read_parquet("data/raw/articles.parquet")
         .filter(pl.col("created_at") >= since)
         .select([
-            "article_id",
+            "article_id", "category_id",
             (pl.col("like_count") * weights["like"]).alias("like_score"),
             (pl.col("share_count") * weights["share"]).alias("share_score"),
             (pl.col("bookmark_count") * weights["bookmark"]).alias("bookmark_score")
@@ -39,15 +44,43 @@ def generate_popularity_candidates(
         .with_columns([
             (pl.col("like_score") + pl.col("share_score") + pl.col("bookmark_score")).alias("popularity_score")
         ])
-        .sort("popularity_score", descending=True)
-        .select("article_id")
-        .limit(top_k)
-        .collect()
     )
 
-    return df["article_id"].to_list()
+    logger.info("Indexing by category...")
+    article_table = df.select(["article_id", "category_id", "popularity_score"])
+    category_map = defaultdict(list)
+    for row in article_table.iter_rows(named=True):
+        category_map[row["category_id"]].append((row["article_id"], max(float(row["popularity_score"]), 1)))
 
-# -----------------------------
+    logger.info("Ranking per user...")
+    all_rows = []
+
+    for member_id, preferred_cats in preferred_map.items():
+        candidates = []
+        for cat_id in preferred_cats:
+            candidates.extend(category_map.get(cat_id, []))
+        
+        # deduplicate
+        unique_scores = {}
+        for article_id, score in candidates:
+            if article_id not in unique_scores or score > unique_scores[article_id]:
+                unique_scores[article_id] = score
+
+        top_items = sorted(unique_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
+
+        for rank, (article_id, score) in enumerate(top_items, start=1):
+            all_rows.append({
+                "member_id": member_id,
+                "article_id": article_id,
+                "score": score,
+                "source": "personal_popular",
+                "rank": rank
+            })
+
+    logger.info(f"Generated {len(all_rows)} personalized popular candidates.")
+    return all_rows
+
+
 # category_id → article_id mapping
 # -----------------------------
 def fetch_category_id_articles() -> Dict[int, Set[str]]:

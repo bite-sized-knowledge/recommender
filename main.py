@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from data.pipeline.fetch_data import *
 from data.candidate_builder import CandidateBuilder
+from data.candidate_merge import merge_candidates
 from common.db import Connection
 from utils.logger import get_logger
 from utils.config_loader import load_config
@@ -21,6 +22,9 @@ def run_pipeline():
         logger.info("=== Candiate Building... === ")
         builder = CandidateBuilder("./data/processed", "./data/candidates", conn,config)
         builder.process_and_save()
+
+        logger.info("=== Candiate Merging... === ")
+        merge_candidates()
 
 
 
