@@ -18,7 +18,7 @@ def save_recommendations_to_db(parquet_path: str, conn, table_name: str = "recom
         print("No recommendations to insert.")
         return
     
-    threshold_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    threshold_date = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
     logger.info(f"Deleting old records before {threshold_date}")
     delete_sql = f"""
         DELETE FROM {table_name}
