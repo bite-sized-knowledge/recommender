@@ -5,6 +5,7 @@ from data.candidate_merge import merge_candidates
 from common.db import Connection
 from utils.logger import get_logger
 from utils.config_loader import load_config
+from utils.candidate_save import save_recommendations_to_db
 
 # 로깅 설정
 logger = get_logger("Candidate-Filtering")
@@ -25,6 +26,12 @@ def run_pipeline():
 
         logger.info("=== Candiate Merging... === ")
         merge_candidates()
+
+        logger.info("=== Saving Data... ===")
+        save_recommendations_to_db(
+            "data/candidates/merged.parquet",
+            conn
+        )
 
 
 

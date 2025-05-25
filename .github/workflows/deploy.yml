@@ -1,0 +1,55 @@
+name: RecSys Offline System
+
+on:
+  push:
+    branches: [ "prod" ]
+  workflow_dispatch:
+    inputs:
+      manual_branch:
+        description: Set branch
+        required: true
+        type: string
+        default: prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: SSH for RecSys Offline
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            echo "1) 코드 업데이트"
+            echo ""
+            cd ~/recommender
+            git pull origin prod
+
+            echo "2) Conda 환경 설정"
+            if conda env list | grep -q "recommender"; then
+                echo "기존 환경 'recommender' 발견. 업데이트 진행..."
+                conda env update --file=./environment.yml --prune -q
+            else
+                echo "환경 'recommender'이 없음. 새로 생성합니다..."
+                conda env create --file=./environment.yml -q
+            fi
+            echo "환경 활성화 완료"
+            echo ""
+
+            echo "3) 환경 변수 설정"
+            cat <<EOF > ~/recommender/.env
+            RDS_DATABASE="${{ secrets.RDS_DATABASE }}"
+            RDS_HOST="${{ secrets.RDS_HOST }}"
+            RDS_USER="${{ secrets.RDS_USER }}"
+            RDS_PASSWORD="${{ secrets.RDS_PASSWORD }}"
+            RDS_PORT="${{ secrets.RDS_PORT }}"
+            DYNAMODB_REGION="${{ secrets.DYNAMODB_REGION }}"
+            EOF
+
+            echo "추천시스템 오프라인 시스템 구동"
