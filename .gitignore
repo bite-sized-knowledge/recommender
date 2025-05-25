@@ -178,3 +178,4 @@ cython_debug/
 # Datas & Models:
 **/raw
 **/processed
+**/*.parquet
