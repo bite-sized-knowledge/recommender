@@ -37,6 +37,10 @@ class CandidateBuilder:
         self.logger.info("Preparing...")
         os.makedirs(self.process_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
+
+        self.logger.info("Saving raw articles into parquet...")
+        fetch_articles_to_parquet(self.conn)
+
         now = datetime.now()
 
         if self.train:
@@ -60,7 +64,6 @@ class CandidateBuilder:
         데이터를 처리하고 결과를 저장합니다.
         """
 
-        fetch_articles_to_parquet(self.conn)
 
         # User 및 Item 임베딩 생성
         embedder = Embedder(model_path=self.config['emb_model']['path'])
