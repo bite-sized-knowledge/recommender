@@ -12,6 +12,7 @@ class Connection:
         self.RDS_PORT = 3306
 
         # SSH 터널 및 DB 연결
+        self.engine = None
         self._connect_to_rds()
 
     def _connect_to_rds(self):
@@ -39,7 +40,8 @@ class Connection:
 
         with self.engine.connect() as conn:
             conn.execute(text(query))
-            conn.commit()
+            if query.strip().lower().startswith(("insert", "update", "delete")):
+                conn.commit()
 
     def save_parquet(self, query: str, path: str):
         """ SQL 결과를 parquet 파일로 저장 """
@@ -64,6 +66,3 @@ class Connection:
         if self.engine:
             self.engine.dispose()
             print("SQLAlchemy Engine Disposed...")
-        if self.tunnel:
-            self.tunnel.stop()
-            print("SSH Tunneling Closed...")
