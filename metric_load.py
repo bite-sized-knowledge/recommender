@@ -14,7 +14,6 @@ if __name__ == "__main__":
         )
 
         metrics = evaluator.evaluate(
-            recommend_date="2025-05-27",
             k_list=[10, 30, 50],
             use_db=True  # recommendation 테이블에서 직접 추출할 경우
         )

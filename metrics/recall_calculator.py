@@ -21,7 +21,7 @@ class RecallEvaluator:
         query = f"""
             SELECT member_id, article_id, recommendation_id, created_at
             FROM recommendation
-            WHERE DATE(created_at) = '{target_date}'
+            WHERE DATE_FORMAT(created_at, '%Y-%m-%d') = '{target_date}'
         """
 
         self.conn.save_parquet(query, self.parquet_path)
@@ -50,7 +50,10 @@ class RecallEvaluator:
             try:
                 response = table.query(
                     KeyConditionExpression=Key("member_id").eq(member_id) &
-                                           Key("timestamp").between(int(start_time.timestamp()), int(end_time.timestamp())),
+                                           Key("timestamp").between(
+                                               int(start_time.timestamp() * 1000), 
+                                               int(end_time.timestamp() * 1000)
+                                            ),
                     FilterExpression=Attr("event_type").eq("article_in") & Attr("target_type").eq("article")
                 )
                 items.extend(response.get("Items", []))
@@ -59,10 +62,16 @@ class RecallEvaluator:
                 print(f"DynamoDB 조회 오류 (member_id: {member_id}): {e}")
 
         if not items:
+            print("No items")
             return pl.DataFrame(schema={"member_id": pl.Int64, "target_id": pl.Utf8})
 
-        # member_id, target_id 컬럼이 존재하는지 확인 후 반환
+        for item in items:
+            ts = int(item["timestamp"]) // 1000
+            item["date"] = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+
         df = pl.DataFrame(items)
+
+        # member_id, target_id 컬럼이 존재하는지 확인 후 반환
         if "member_id" in df.columns and "target_id" in df.columns:
             return df.select(["member_id", "target_id"])
         else:
@@ -108,12 +117,29 @@ class RecallEvaluator:
 
     def evaluate(
         self,
-        recommend_date: str,
+        recommend_date: str = datetime.now().strftime("%Y-%m-%d"),
         k_list: List[int] = [10, 30, 50, 100],
         use_db: bool = False
     ) -> str:
         """
         지정한 날짜에 대해 recall 평가를 수행하고 JSON 문자열로 반환
+
+        ----------
+        metrics : dict
+            total_users : int
+                추천 결과에 등장하는 고유 유저(member_id) 수.
+            total_recommendations : int
+                추천 결과의 전체 (user, article) 쌍 개수.
+            unique_items_recommended : int
+                추천 결과에서 추천된 고유 article_id 개수.
+            recall_at_{k} : float
+                각 k에 대해, 추천 상위 k개 중 실제 클릭이 1개 이상 발생한 유저의 비율.
+            hit_users_at_{k} : int
+                각 k에 대해, 추천 상위 k개 중 실제 클릭이 1개 이상 발생한 유저 수.
+            metric_date : str
+                평가 기준 날짜(입력 recommend_date).
+            created_at : str
+                metric 생성 시각(ISO 포맷).
         """
         if use_db:
             self.load_recommendations_from_db(recommend_date)
@@ -123,8 +149,11 @@ class RecallEvaluator:
             raise ValueError(f"{recommend_date} 날짜의 추천 데이터가 없습니다.")
 
         member_ids = rec_df.select("member_id").unique().to_series().to_list()
-        rec_time = datetime.strptime(recommend_date, "%Y-%m-%d").replace(hour=2, tzinfo=timezone.utc)
-        end_time = rec_time + timedelta(days=1)
+        rec_time = datetime.strptime(recommend_date, "%Y-%m-%d")
+        end_time = rec_time + timedelta(hours=24)
+
+        print(f"Timestamp {rec_time}")
+
 
         click_df = self.fetch_click_events(member_ids, rec_time, end_time)
         metrics = self.calculate_recall_at_k(rec_df, click_df, k_list)
