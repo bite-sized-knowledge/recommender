@@ -132,7 +132,6 @@ class UserSegmentation:
               .agg([
                   pl.max("timestamp").alias("last_event_ts"),
                   pl.len().alias("event_count"),
-                  pl.col("event_type").n_unique().alias("event_diversity"),
               ])
               .with_columns([
                   ((now_ms - pl.col("last_event_ts")) / (1000 * 60 * 60 * 24)).alias("recency_days")
