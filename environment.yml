@@ -21,7 +21,7 @@ dependencies:
       - gensim
       - pyyaml
       - pyarrow
-      - compress-fasttext>=0.1.0
+      - qdrant-client
 
 # - torch
 # - --extra-index-url https://download.pytorch.org/whl/cu118
