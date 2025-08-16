@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from data.pipeline.fetch_data import *
 from data.candidate_builder import CandidateBuilder
 from data.candidate_merge import merge_candidates
+from data.seg_routing import UserSegmentation
 from common.db import Connection
 from utils.logger import get_logger
 from utils.config_loader import load_config
@@ -19,6 +20,10 @@ def run_pipeline():
         logger.info("=== Connection & Config loading... ===")
         conn = Connection()
         config = load_config()
+
+        logger.info("=== User Segment Routing... ===")
+        router = UserSegmentation(conn)
+        segments = router.run()
 
         logger.info("=== Candiate Building... === ")
         builder = CandidateBuilder("./data/processed", "./data/candidates", conn,config)
