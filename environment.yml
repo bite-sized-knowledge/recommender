@@ -17,7 +17,6 @@ dependencies:
       - paramiko
       - pymysql
       - sqlalchemy
-      - python-dotenv
       - gensim
       - pyyaml
       - pyarrow

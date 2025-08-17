@@ -1,7 +1,6 @@
-from dotenv import load_dotenv
 from data.pipeline.fetch_data import *
-from data.candidate_builder import CandidateBuilder
-from data.candidate_merge import merge_candidates
+# from data.candidate_builder import CandidateBuilder
+# from data.candidate_merge import merge_candidates
 from data.seg_routing import UserSegmentation
 from common.db import Connection
 from utils.logger import get_logger
@@ -10,7 +9,7 @@ from utils.candidate_save import save_recommendations_to_db
 
 # 로깅 설정
 logger = get_logger("Candidate-Filtering")
-load_dotenv()
+
 
 def run_pipeline():
     """
@@ -25,18 +24,20 @@ def run_pipeline():
         router = UserSegmentation(conn)
         segments = router.run()
 
-        logger.info("=== Candiate Building... === ")
-        builder = CandidateBuilder("./data/processed", "./data/candidates", conn,config)
-        builder.process_and_save()
+        print(segments)
 
-        logger.info("=== Candiate Merging... === ")
-        merge_candidates()
+        # logger.info("=== Candiate Building... === ")
+        # builder = CandidateBuilder("./data/processed", "./data/candidates", conn,config)
+        # builder.process_and_save()
 
-        logger.info("=== Saving Data... ===")
-        save_recommendations_to_db(
-            "data/candidates/merged.parquet",
-            conn
-        )
+        # logger.info("=== Candiate Merging... === ")
+        # merge_candidates()
+
+        # logger.info("=== Saving Data... ===")
+        # save_recommendations_to_db(
+        #     "data/candidates/merged.parquet",
+        #     conn
+        # )
 
 
 
@@ -50,4 +51,5 @@ def run_pipeline():
             pass
 
 if __name__ == "__main__":
-    run_pipeline()
+    print(os.getenv("RDS_HOST"))
+    # run_pipeline()
