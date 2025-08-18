@@ -1,10 +1,9 @@
-import os
 import polars as pl
 import numpy as np
 from data.pipeline.fetch_data import *
-from data.pipeline.content_embedding import *
-from embeddings.model import Embedder
-from datetime import datetime, timedelta
+from data.pipeline.behavior_embedding import build_behavior_embedding
+from data.pipeline.initial_embedding import build_user_initial_embedding
+from data.pipeline.mix_user_embedding import build_all_user_embeddings
 from typing import Any, Dict
 from utils.logger import get_logger
 
@@ -14,118 +13,42 @@ class CandidateBuilder:
     """
     def __init__(
             self, 
-            process_dir: str,
-            output_dir: str,
             conn: Any,
             config: Dict[str, str],
-            train: bool = True
         ):
 
-        self.process_dir = process_dir
-        self.output_dir = output_dir
         self.conn = conn
+        self.qdrant = conn.get_qdrant()
+        self.tbl = conn.get_dynamo().Table('event')
         self.config = config
         self.logger = get_logger("Candidate Builder")
-        self.train = train
-        self.user_positive_map = None
-        self.all_article_ids = None
 
-        self.prepare()
- 
-    def prepare(self):
-        """ 시간 범위 설정 """
-        self.logger.info("Preparing...")
-        os.makedirs(self.process_dir, exist_ok=True)
-        os.makedirs(self.output_dir, exist_ok=True)
+    def run(self):
 
-        self.logger.info("Saving raw articles into parquet...")
-        fetch_articles_to_parquet(self.conn)
-
-        now = datetime.now()
-
-        if self.train:
-            start_ts = int((now - timedelta(days=7)).timestamp() * 1000)
-            end_ts = int((now - timedelta(days=1)).timestamp() * 1000)
-        else:
-            start_ts = int((now - timedelta(days=1)).timestamp() * 1000)
-            end_ts = int((now - timedelta(days=0)).timestamp() * 1000)
-
-           
-        self.user_positive_map = fetch_positive_logs(self.conn, start_ts, end_ts)
-        self.all_article_ids = fetch_all_article_ids()
-        self.preferred_map = build_preferred_category_map(
-            self.conn, 
-            self.user_positive_map
-        )
-   
-
-    def process_and_save(self):
-        """
-        데이터를 처리하고 결과를 저장합니다.
-        """
-
-
-        # User 및 Item 임베딩 생성
-        embedder = Embedder(model_path=self.config['emb_model']['path'])
-        update_embeddings(embedder)
-        generate_user_embeddings(self.user_positive_map)
-        generate_category_embedding(
-            fetch_category_id_articles()
-        )
-
-        # 학습 데이터 생성
-        dataset = generate_training_samples(self.user_positive_map)
-        self._save_to_parquet(
-            dataset, 
-            ["member_id", "article_id", "label"],
-            "training_samples.parquet"
-        )
-
-        # 인기 아티클 저장 
-        popularity_articles = generate_personalized_popularity_candidates(
-            self.preferred_map,
-            days=14
-        )
-
-        self._save_to_parquet(
-            popularity_articles, 
-            ["member_id", "article_id", "score", "source", "rank"],
-            "personal_popular.parquet",
-            candidate=True
-        )
-
-        # User-Item 코사인 유사도 계산
-        generate_sim_candidates(
-            n_rows=100,
-            preferred_map=self.preferred_map
+        # 1. Category Centroid Embedding
+        build_category_profiles(
+            client=self.qdrant,
+            min_points=3
         )
 
 
-    def _save_to_file(self, data, file_name):
-        """
-        데이터를 파일에 저장합니다.
-        """
-        file_path = os.path.join(self.process_dir, file_name)
-        np.save(file_path, data)
+        # 2. User Initial Embedding = mean of picked categories
+        user_init_embedding = build_user_initial_embedding(
+            conn=self.conn,
+            client=self.qdrant,
+            dim = 512
+        )
 
-    def _save_to_parquet(self, data: Any, columns: List[str], file_name: str, candidate=False) -> None:
-        """
-        데이터를 Parquet 형식으로 저장합니다 (Polars 기반).
+        # 3. Build user behavior embedding
+        user_behavior_embedding = build_behavior_embedding(
+            conn=self.conn,
+            qdrant=self.qdrant,
+            table=self.tbl
+        )
 
-        Args:
-            data (Any): 저장할 데이터 (list of dicts 또는 list of lists)
-            columns (List[str]): 컬럼 이름
-            file_name (str): 저장할 파일명 (예: candidates.parquet)
-        """
-        # data 형태에 따라 처리 분기
-        if not candidate:
-            file_path = os.path.join(self.process_dir, file_name)
-        else:
-            file_path = os.path.join(self.output_dir, file_name)
+        build_all_user_embeddings(
+            user_init_embedding,
+            user_behavior_embedding,
+            self.qdrant
+        )
 
-        if data is None:
-            self.logger("No Data Fetched...")
-            return
-
-        df = pl.DataFrame(data, schema=columns, orient="row")
-        df.write_parquet(file_path, compression="zstd")

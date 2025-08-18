@@ -1,30 +1,11 @@
 import time
-from typing import Any, Dict, List, Sequence, Optional
-from decimal import Decimal
-import boto3
+from typing import Any, Dict, List, Optional
 from boto3.dynamodb.conditions import Attr
 import polars as pl
+from data.utils import (
+    _to_py, _ensure_keys, _query_all_active_users
+)
 
-
-# -------------------- Helpers --------------------
-def _to_py(v):
-    """DynamoDB Decimal/중첩 정규화"""
-    if isinstance(v, Decimal):
-        return int(v) if v == v.to_integral_value() else float(v)
-    if isinstance(v, dict):
-        return {k: _to_py(x) for k, x in v.items()}
-    if isinstance(v, list):
-        return [_to_py(x) for x in v]
-    return v
-
-def _ensure_keys(d: Dict[str, Any], keys: Sequence[str]) -> Dict[str, Any]:
-    for k in keys:
-        if k not in d:
-            d[k] = None
-    return d
-
-
-# ----------------------------------------
 class UserSegmentation:
     """
     DynamoDB 로그 기반 유저 세그먼트 분류 (cold / warm / hot)
@@ -163,7 +144,7 @@ class UserSegmentation:
 
     def run(self, days: int = 7) -> pl.DataFrame:
         """원스톱: 최근 N일 로그 fetch → 세그먼트 분류 결과 반환"""
-        all_users = self.conn.execute("select distinct member_id from member")
+        all_users = self.conn.execute(_query_all_active_users())
 
         df = self.fetch_events_last_ndays(days=days)
         seg = self.classify_users_quantile(df)

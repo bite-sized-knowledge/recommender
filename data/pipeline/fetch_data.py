@@ -1,4 +1,3 @@
-import os
 import numpy as np
 from typing import Tuple
 from qdrant_client import QdrantClient
@@ -6,6 +5,7 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue
 )
+from data.utils import _l2_normalize
 
 ITEM_COLLECTION = "bite-vectordb"
 CAT_COLLECTION  = "category-profiles"
@@ -14,14 +14,6 @@ MIN_POINTS = 5
 
 
 # ----- 유틸 -----
-def l2_normalize(v: np.ndarray) -> np.ndarray:
-    if v.ndim == 1:
-        n = np.linalg.norm(v)
-        return (v / n).astype(np.float32) if n > 0 else v.astype(np.float32)
-    n = np.linalg.norm(v, axis=1, keepdims=True)
-    n = np.where(n == 0, 1.0, n)
-    return (v / n).astype(np.float32)
-
 def get_dim_and_metric(client: QdrantClient, collection: str) -> Tuple[int, str]:
     info = client.get_collection(collection)
     dim = info.config.params.vectors.size
@@ -83,7 +75,7 @@ def build_category_profiles(client, min_points: int = MIN_POINTS):
             continue
 
         # 아이템 벡터가 이미 정규화라면 단순 평균 후 재정규화
-        centroid = l2_normalize(V.mean(axis=0))
+        centroid = _l2_normalize(V.mean(axis=0))
 
         client.upsert(
             collection_name=CAT_COLLECTION,

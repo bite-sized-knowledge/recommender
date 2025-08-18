@@ -1,5 +1,5 @@
 from data.pipeline.fetch_data import *
-# from data.candidate_builder import CandidateBuilder
+from data.candidate_builder import CandidateBuilder
 # from data.candidate_merge import merge_candidates
 from data.seg_routing import UserSegmentation
 from common.db import Connection
@@ -24,10 +24,12 @@ def run_pipeline():
         router = UserSegmentation(conn)
         segments = router.run()
 
-        print(segments)
-
-        # logger.info("=== Candiate Building... === ")
-        # builder = CandidateBuilder("./data/processed", "./data/candidates", conn,config)
+        logger.info("=== Candiate Building... === ")
+        builder = CandidateBuilder(
+            conn,
+            config,
+        )
+        builder.run()
         # builder.process_and_save()
 
         # logger.info("=== Candiate Merging... === ")
@@ -51,5 +53,4 @@ def run_pipeline():
             pass
 
 if __name__ == "__main__":
-    print(os.getenv("RDS_HOST"))
-    # run_pipeline()
+    run_pipeline()
