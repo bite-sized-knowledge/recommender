@@ -2,7 +2,7 @@ import polars as pl
 from datetime import datetime, timedelta
 from utils.logger import get_logger
 
-def save_recommendations_to_db(parquet_path: str, conn, table_name: str = "recommendation"):
+def save_recommendations_to_db(df, conn, table_name: str = "recommendation"):
     """
     Insert (member_id, article_id) pairs from a merged parquet file into a recommendation table.
 
@@ -12,7 +12,6 @@ def save_recommendations_to_db(parquet_path: str, conn, table_name: str = "recom
         table_name (str): Table name to insert into
     """
     logger = get_logger(f"Saving Data into {table_name} table...")
-    df = pl.read_parquet(parquet_path).select(["member_id", "article_id"])
     
     if df.is_empty():
         print("No recommendations to insert.")

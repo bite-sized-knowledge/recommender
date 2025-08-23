@@ -1,8 +1,6 @@
 from metrics.recall_calculator import RecallEvaluator 
-from dotenv import load_dotenv
 from common.db import Connection
 
-load_dotenv()
 
 if __name__ == "__main__":
     try:

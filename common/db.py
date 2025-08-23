@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, text
 import polars as pl
 import boto3
 import os
+from qdrant_client import QdrantClient
 
 class Connection:
     def __init__(self):
@@ -9,7 +10,9 @@ class Connection:
         self.RDS_HOST = os.getenv("RDS_HOST")
         self.RDS_USER = os.getenv("RDS_USER")
         self.RDS_PASSWORD = os.getenv("RDS_PASSWORD")
-        self.RDS_PORT = 3306
+        self.RDS_PORT = os.getenv("RDS_PORT")
+        self.QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT")
+        self.QDRANT_API = os.getenv("QDRANT_API")
 
         # SSH 터널 및 DB 연결
         self.engine = None
@@ -60,6 +63,14 @@ class Connection:
             return
 
         return _dynamo_resource
+
+    def get_qdrant(self):
+        client = QdrantClient(
+            url=self.QDRANT_ENDPOINT,
+            api_key=self.QDRANT_API
+        )
+
+        return client
 
     def close(self):
         """ 연결 종료 """
