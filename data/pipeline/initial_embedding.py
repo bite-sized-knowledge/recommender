@@ -82,5 +82,4 @@ def build_user_initial_embedding(conn, client:QdrantClient, dim) -> Dict[int, Li
         if vec is not None:
             user_vecs[mid] = vec
 
-    print("[User Initial Embedding] Calculation Complete...") 
     return user_vecs

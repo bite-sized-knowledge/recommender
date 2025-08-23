@@ -88,5 +88,3 @@ def build_category_profiles(client, min_points: int = MIN_POINTS):
             ]
         )
         created += 1
-
-    print(f"[CategoryProfiles] created={created}, skipped={skipped}")

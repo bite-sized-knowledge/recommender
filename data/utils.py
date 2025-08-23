@@ -13,6 +13,27 @@ EVENT_WEIGHTS = {
     "f_imp": 0.05,
 }
 
+TOPK = {
+    "cold": {   # 최근 7일 클릭 없음
+        "user_embedding": 60,    # A
+        "fresh_popular": 80,     # B
+        "global_popular": 40,    # C
+        "exploration": 20        # D
+    },
+    "warm": {   # 소수 클릭
+        "user_embedding": 100,   # A
+        "fresh_popular": 60,     # B
+        "global_popular": 20,    # C
+        "exploration": 20        # D
+    },
+    "hot": {    # 활발
+        "user_embedding": 120,   # A
+        "fresh_popular": 40,     # B
+        "global_popular": 25,    # C
+        "exploration": 15        # D
+    }
+}
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)

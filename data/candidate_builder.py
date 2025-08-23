@@ -4,6 +4,8 @@ from data.pipeline.fetch_data import *
 from data.pipeline.behavior_embedding import build_behavior_embedding
 from data.pipeline.initial_embedding import build_user_initial_embedding
 from data.pipeline.mix_user_embedding import build_all_user_embeddings
+from data.pipeline.popularity import compute_popular
+from data.candidate_merge import merge_candidates_for_all_users
 from typing import Any, Dict
 from utils.logger import get_logger
 
@@ -52,3 +54,23 @@ class CandidateBuilder:
             self.qdrant
         )
 
+        popular = []
+
+        for case in [(7,3), (30, 14)]:
+            start, end = case
+            popular.append(
+                compute_popular(
+                    self.conn,
+                    self.tbl,
+                    start=start,
+                    end=end
+                )
+            )
+
+        candidates = merge_candidates_for_all_users(
+            self.conn,
+            self.qdrant,
+            popular,
+        ) 
+
+        return candidates

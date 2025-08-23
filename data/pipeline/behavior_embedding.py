@@ -194,5 +194,4 @@ def build_behavior_embedding(
 
         res[user] = {"vector" : vector, "logs" : user_logs}
 
-    print("[Behavior Embedding] Calculation Complete...") 
     return res

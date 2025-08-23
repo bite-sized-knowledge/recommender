@@ -124,4 +124,3 @@ def build_all_user_embeddings(
             )
 
     client.upsert(collection_name=USER_COLLECTION, points=points)
-    print("[Weighted Hybrid Embedding] Calculation Complete & Upsert into Qdrant...") 

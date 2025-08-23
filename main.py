@@ -27,19 +27,15 @@ def run_pipeline():
         logger.info("=== Candiate Building... === ")
         builder = CandidateBuilder(
             conn,
-            config,
+            config
         )
-        builder.run()
-        # builder.process_and_save()
+        candidates = builder.run()
 
-        # logger.info("=== Candiate Merging... === ")
-        # merge_candidates()
-
-        # logger.info("=== Saving Data... ===")
-        # save_recommendations_to_db(
-        #     "data/candidates/merged.parquet",
-        #     conn
-        # )
+        logger.info("=== Saving Data... ===")
+        save_recommendations_to_db(
+            candidates,
+            conn
+        )
 
 
 
