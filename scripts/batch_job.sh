@@ -16,4 +16,4 @@ conda activate $ENV_NAME
 
 # 스크립트 실행
 cd "$PROJECT_DIR"
-python main.py >> "$LOG_FILE" 2>&1 &
+doppler run -- python main.py >> "$LOG_FILE" 2>&1 &
