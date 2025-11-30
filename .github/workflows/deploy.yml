@@ -49,7 +49,6 @@ jobs:
             RDS_USER="${{ secrets.RDS_USER }}"
             RDS_PASSWORD="${{ secrets.RDS_PASSWORD }}"
             RDS_PORT="${{ secrets.RDS_PORT }}"
-            DYNAMODB_REGION="${{ secrets.DYNAMODB_REGION }}"
             EOF
 
             echo "추천시스템 오프라인 시스템 구동"
