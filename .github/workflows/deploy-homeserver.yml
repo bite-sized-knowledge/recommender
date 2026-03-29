@@ -1,0 +1,45 @@
+name: Deploy Recommender Batch Assets to Home Server
+
+on:
+  push:
+    branches: ["prod"]
+    paths:
+      - 'main.py'
+      - 'common/**'
+      - 'data/**'
+      - 'utils/**'
+      - 'config/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Upload recommender source
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "."
+          target: "${{ secrets.DEPLOY_PATH }}/recommender"
+
+      - name: Build recommender batch image via infra compose
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}/infra"
+            docker-compose --profile batch build recommender
