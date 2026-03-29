@@ -6,13 +6,13 @@ from qdrant_client import QdrantClient
 
 class Connection:
     def __init__(self):
-        self.RDS_DATABASE = os.getenv('RDS_DATABASE')
-        self.RDS_HOST = os.getenv("RDS_HOST")
-        self.RDS_USER = os.getenv("RDS_USER")
-        self.RDS_PASSWORD = os.getenv("RDS_PASSWORD")
-        self.RDS_PORT = os.getenv("RDS_PORT")
-        self.QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT")
-        self.QDRANT_API = os.getenv("QDRANT_API")
+        self.RDS_DATABASE = os.getenv("RDS_DATABASE") or os.getenv("DB_NAME")
+        self.RDS_HOST = os.getenv("RDS_HOST") or os.getenv("DB_HOST")
+        self.RDS_USER = os.getenv("RDS_USER") or os.getenv("DB_USER")
+        self.RDS_PASSWORD = os.getenv("RDS_PASSWORD") or os.getenv("DB_PASSWORD")
+        self.RDS_PORT = os.getenv("RDS_PORT") or os.getenv("DB_PORT")
+        self.QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT") or os.getenv("QDRANT_URL")
+        self.QDRANT_API = os.getenv("QDRANT_API") or os.getenv("QDRANT_API_KEY")
 
         # SSH 터널 및 DB 연결
         self.engine = None
@@ -23,8 +23,8 @@ class Connection:
         try:
             # SQLAlchemy 엔진 생성
             self.engine = create_engine(
-                f"mysql+pymysql://{self.RDS_USER}:{self.RDS_PASSWORD}" 
-                f"@{self.RDS_HOST}:{self.RDS_PORT}/{self.RDS_DATABASE}"
+                f"mysql+pymysql://{self.RDS_USER}:{self.RDS_PASSWORD}@"
+                f"{self.RDS_HOST}:{self.RDS_PORT}/{self.RDS_DATABASE}"
             )
 
         except Exception as e:
@@ -54,8 +54,14 @@ class Connection:
 
     def get_dynamo(self):
         region = os.getenv("DYNAMODB_REGION", "ap-northeast-2")
+        endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL", "").strip()
 
         boto3_params = {"region_name": region}
+        if endpoint_url:
+            boto3_params["endpoint_url"] = endpoint_url
+            boto3_params["aws_access_key_id"] = os.getenv("DYNAMODB_ACCESS_KEY_ID", "dummy")
+            boto3_params["aws_secret_access_key"] = os.getenv("DYNAMODB_SECRET_ACCESS_KEY", "dummy")
+
         try:
             _dynamo_resource = boto3.resource("dynamodb", **boto3_params)
         except Exception as e:
