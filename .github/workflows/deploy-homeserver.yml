@@ -22,7 +22,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check deploy connectivity
+        id: deploy_guard
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if timeout 5 bash -lc "</dev/tcp/$SSH_HOST/$SSH_PORT" 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+
       - name: Upload recommender source
+        if: steps.deploy_guard.outputs.enabled == 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -33,6 +52,7 @@ jobs:
           target: "~/recommender"
 
       - name: Build recommender batch image via infra compose
+        if: steps.deploy_guard.outputs.enabled == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
