@@ -1,0 +1,14 @@
+numpy
+pandas
+scikit-learn
+tqdm
+polars
+awscli
+boto3
+paramiko
+pymysql
+sqlalchemy
+gensim
+pyyaml
+pyarrow
+qdrant-client
