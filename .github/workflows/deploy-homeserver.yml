@@ -49,7 +49,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           source: "."
-          target: "~/recommender"
+          target: "~/projects/recommender"
 
       - name: Build recommender batch image via infra compose
         if: steps.deploy_guard.outputs.enabled == 'true'
@@ -61,5 +61,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
-            cd ~/infra
-            docker-compose --profile batch build recommender
+            cd ~/projects/infra
+            docker compose --profile batch build recommender
