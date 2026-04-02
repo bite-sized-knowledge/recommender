@@ -19,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Check deploy connectivity
         id: deploy_guard
         env:
@@ -40,18 +37,7 @@ jobs:
           fi
           echo "enabled=false" >> "$GITHUB_OUTPUT"
 
-      - name: Upload recommender source
-        if: steps.deploy_guard.outputs.enabled == 'true'
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "."
-          target: "~/projects/recommender"
-
-      - name: Build recommender batch image via infra compose
+      - name: Build recommender batch image on home server
         if: steps.deploy_guard.outputs.enabled == 'true'
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -61,5 +47,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
+            cd ~/projects/recommender
+            git pull origin prod
             cd ~/projects/infra
             docker compose --profile batch build recommender
