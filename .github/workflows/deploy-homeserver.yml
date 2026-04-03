@@ -16,26 +16,20 @@ jobs:
       - name: Check deploy connectivity
         id: deploy_guard
         env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_PORT: ${{ secrets.SSH_PORT }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-          SSH_KEY: ${{ secrets.SSH_KEY }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
         run: |
-          if [ -z "$SSH_HOST" ] || [ -z "$SSH_PORT" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_KEY" ]; then
+          if [ -z "$DEPLOY_TOKEN" ] || [ -z "$DEPLOY_WEBHOOK_URL" ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - name: Pull recommender image on home server
+      - name: Deploy via webhook
         if: steps.deploy_guard.outputs.enabled == 'true'
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            set -e
-            cd ~/projects/infra
-            docker compose --profile batch pull recommender
+        run: |
+          RESPONSE=$(curl -sf -X POST \
+            "${{ secrets.DEPLOY_WEBHOOK_URL }}/deploy?service=recommender" \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"ok":true' || exit 1
