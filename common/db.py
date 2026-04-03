@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, text
 import polars as pl
-import boto3
 import os
 from qdrant_client import QdrantClient
 
@@ -51,24 +50,6 @@ class Connection:
         df = self.execute(query)
         df.write_parquet(path)
         print(f"Saved to {path}")
-
-    def get_dynamo(self):
-        region = os.getenv("DYNAMODB_REGION", "ap-northeast-2")
-        endpoint_url = os.getenv("DYNAMODB_ENDPOINT_URL", "").strip()
-
-        boto3_params = {"region_name": region}
-        if endpoint_url:
-            boto3_params["endpoint_url"] = endpoint_url
-            boto3_params["aws_access_key_id"] = os.getenv("DYNAMODB_ACCESS_KEY_ID", "dummy")
-            boto3_params["aws_secret_access_key"] = os.getenv("DYNAMODB_SECRET_ACCESS_KEY", "dummy")
-
-        try:
-            _dynamo_resource = boto3.resource("dynamodb", **boto3_params)
-        except Exception as e:
-            print(f"Dynamo Connection Failed : {e}")
-            return
-
-        return _dynamo_resource
 
     def get_qdrant(self):
         client = QdrantClient(

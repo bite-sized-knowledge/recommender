@@ -21,7 +21,6 @@ class CandidateBuilder:
 
         self.conn = conn
         self.qdrant = conn.get_qdrant()
-        self.tbl = conn.get_dynamo().Table('event')
         self.config = config
         self.logger = get_logger("Candidate Builder")
 
@@ -45,7 +44,6 @@ class CandidateBuilder:
         user_behavior_embedding = build_behavior_embedding(
             conn=self.conn,
             qdrant=self.qdrant,
-            table=self.tbl
         )
 
         build_all_user_embeddings(
@@ -61,7 +59,6 @@ class CandidateBuilder:
             popular.append(
                 compute_popular(
                     self.conn,
-                    self.tbl,
                     start=start,
                     end=end
                 )

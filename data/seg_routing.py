@@ -1,91 +1,50 @@
 import time
-from typing import Any, Dict, List, Optional
-from boto3.dynamodb.conditions import Attr
 import polars as pl
-from data.utils import (
-    _to_py, _ensure_keys, _query_all_active_users
-)
+from data.utils import _query_all_active_users
+
 
 class UserSegmentation:
     """
-    DynamoDB 로그 기반 유저 세그먼트 분류 (cold / warm / hot)
-    - 최근 N일 로그 스캔 → Polars df
-    - 분류 기준: Recency(최근 1/3/7일), 이벤트 수 Quantile, 행동 다양성
+    MySQL user_events 기반 유저 세그먼트 분류 (cold / warm / hot)
+    - 최근 N일 로그 조회 → Polars df
+    - 분류 기준: Recency(최근 1/3/7일), 이벤트 수 Quantile
     """
 
-    def __init__(
-        self,
-        conn = None
-    ):
+    def __init__(self, conn=None):
         if conn is None:
-            raise ValueError("table_resource를 반드시 제공해야 합니다.")
-
-        dynamo = conn.get_dynamo() 
-        self.tbl = dynamo.Table('event')
+            raise ValueError("conn을 반드시 제공해야 합니다.")
         self.conn = conn
 
     # -------------------- Public API --------------------
 
-    def fetch_events_last_ndays(self, days: int = 7, limit: int = 1000) -> pl.DataFrame:
-        """최근 N일 로그를 스캔하여 Polars DataFrame 반환"""
-        end_ms = int(time.time() * 1000)
-        start_ms = end_ms - days * 24 * 60 * 60 * 1000
+    def fetch_events_last_ndays(self, days: int = 7) -> pl.DataFrame:
+        """최근 N일 이벤트를 MySQL에서 조회하여 Polars DataFrame 반환"""
+        sql = f"""
+        SELECT
+            member_id,
+            LOWER(event_type) AS event_type,
+            CAST(article_id AS CHAR) AS target_id,
+            UNIX_TIMESTAMP(occurred_at) * 1000 AS timestamp
+        FROM user_events
+        WHERE occurred_at >= NOW() - INTERVAL {days} DAY
+          AND article_id IS NOT NULL
+        """
 
-        expr_attr_names = {"#ts": "timestamp"}
-        projection_expression = "member_id, event_type, target_type, target_id, #ts"
-        filter_expression = Attr("timestamp").between(start_ms, end_ms)
+        df = self.conn.execute(sql)
 
-        items: List[Dict[str, Any]] = []
-        last_evaluated_key: Optional[Dict[str, Any]] = None
-
-        while True:
-            scan_kwargs = {
-                "FilterExpression": filter_expression,
-                "ExpressionAttributeNames": expr_attr_names,
-                "ProjectionExpression": projection_expression,
-                "Limit": limit,
-            }
-            if last_evaluated_key:
-                scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-            resp = self.tbl.scan(**scan_kwargs)
-            page_items = resp.get("Items", [])
-            if page_items:
-                items.extend(page_items)
-
-            last_evaluated_key = resp.get("LastEvaluatedKey")
-            if not last_evaluated_key:
-                break
-
-        if not items:
+        if df.is_empty():
             return pl.DataFrame(
                 schema={
                     "member_id": pl.Int64,
                     "event_type": pl.Utf8,
-                    "target_type": pl.Utf8,
                     "target_id": pl.Utf8,
                     "timestamp": pl.Int64,
                     "datetime_utc": pl.Datetime("ms"),
                 }
             )
 
-        wanted = ["member_id", "event_type", "target_type", "target_id", "timestamp"]
-        items_norm = [_ensure_keys(_to_py(it), wanted) for it in items]
-
-        df = pl.from_dicts(
-            items_norm,
-            schema={
-                "member_id": pl.Int64,
-                "event_type": pl.Utf8,
-                "target_type": pl.Utf8,
-                "target_id": pl.Utf8,
-                "timestamp": pl.Int64,  # epoch ms
-            },
-        ).with_columns(
+        df = df.with_columns(
             pl.col("member_id").cast(pl.Int64, strict=False),
-            pl.col("event_type").cast(pl.Utf8, strict=False),
-            pl.col("target_type").cast(pl.Utf8, strict=False),
-            pl.col("target_id").cast(pl.Utf8, strict=False),
             pl.col("timestamp").cast(pl.Int64, strict=False),
         )
 
@@ -96,14 +55,8 @@ class UserSegmentation:
               .alias("datetime_utc")
         )
 
-        # 안전 필터 (범위 밖 제거)
-        df = df.filter(
-            pl.col("timestamp").is_not_null()
-            & (pl.col("timestamp") >= start_ms)
-            & (pl.col("timestamp") <= end_ms)
-        )
         return df
-    
+
     def classify_users_quantile(self, df: pl.DataFrame) -> pl.DataFrame:
         now_ms = int(time.time() * 1000)
 

@@ -6,6 +6,7 @@ from common.db import Connection
 from utils.logger import get_logger
 from utils.config_loader import load_config
 from utils.candidate_save import save_recommendations_to_db
+from data.pipeline.engagement_aggregator import aggregate_engagement
 
 # 로깅 설정
 logger = get_logger("Candidate-Filtering")
@@ -37,7 +38,8 @@ def run_pipeline():
             conn
         )
 
-
+        logger.info("=== Aggregating Engagement Scores... ===")
+        aggregate_engagement(conn)
 
     except Exception as e:
         logger.exception(f"Pipeline failed : {e}")

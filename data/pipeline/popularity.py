@@ -1,11 +1,8 @@
 import numpy as np
 import polars as pl
 from typing import Optional
-from data.utils import (
-    TOPK, EVENT_WEIGHTS, 
-)
+from data.utils import EVENT_WEIGHTS
 import datetime as dt
-from boto3.dynamodb.conditions import Attr, Key
 
 
 now_utc = dt.datetime.now()
@@ -13,47 +10,29 @@ now_utc = dt.datetime.now()
 def to_epoch_ms(ts: dt.datetime) -> int:
     return int(ts.timestamp() * 1000)
 
-def fetch_article_in_counts(table, start, end) -> pl.DataFrame:
+def fetch_article_in_counts(conn, start, end) -> pl.DataFrame:
     """
-    DynamoDB에서 event_type='article_in', target_type='article'인 이벤트를
-    [START_MS, END_MS) 구간으로 스캔하여 article_id별 count를 집계.
+    MySQL user_events에서 event_type='ARTICLE_IN'인 이벤트를
+    [start일 전, end일 전) 구간으로 조회하여 article_id별 count를 집계.
     반환 스키마: {article_id: Utf8, article_ins: Int64}
     """
 
-    START_MS = to_epoch_ms(now_utc - dt.timedelta(days=start))
-    END_MS = to_epoch_ms(now_utc - dt.timedelta(days=end))
+    sql = f"""
+    SELECT
+        CAST(article_id AS CHAR) AS article_id,
+        COUNT(*) AS article_ins
+    FROM user_events
+    WHERE LOWER(event_type) = 'article_in'
+      AND occurred_at BETWEEN NOW() - INTERVAL {start} DAY AND NOW() - INTERVAL {end} DAY
+      AND article_id IS NOT NULL
+    GROUP BY article_id
+    """
 
-    resp = table.query(
-        IndexName="event_type-timestamp-index",
-        KeyConditionExpression=(
-            Key("event_type").eq("article_in") &
-            Key("timestamp").between(START_MS, END_MS)
-        ),
-        FilterExpression=Attr("target_type").eq("article")
-    )
+    df = conn.execute(sql)
 
-    items = resp.get("Items", [])
-    while "LastEvaluatedKey" in resp:
-        resp = table.query(
-            IndexName="event_type-timestamp-index",
-            KeyConditionExpression=(
-                Key("event_type").eq("article_in") &
-                Key("timestamp").between(START_MS, END_MS)
-            ),
-            FilterExpression=Attr("target_type").eq("article"),
-            ExclusiveStartKey=resp["LastEvaluatedKey"]
-        )
-        items.extend(resp.get("Items", []))
-
-    if not items:
+    if df.is_empty():
         return pl.DataFrame(schema={"article_id": pl.Utf8, "article_ins": pl.Int64})
 
-    df = pl.DataFrame(items)
-
-    if "target_id" in df.columns:
-        df = df.rename({"target_id": "article_id"})
-
-    df = df.group_by("article_id").len().rename({"len": "article_ins"})
     return df
 
 def fetch_engagements(conn, start, end) -> pl.DataFrame:
@@ -76,7 +55,7 @@ def fetch_engagements(conn, start, end) -> pl.DataFrame:
         UNION ALL
         SELECT article_id, 0, COUNT(*), 0
         FROM article_share
-        WHERE 
+        WHERE
           created_at >= '{start_dt}' AND created_at < '{end_dt}'
         GROUP BY article_id
         UNION ALL
@@ -104,8 +83,8 @@ def fetch_engagements(conn, start, end) -> pl.DataFrame:
 
     return df
 
-def compute_popular(conn ,table, start, end) -> pl.DataFrame:
-    df_in = fetch_article_in_counts(table, start, end)                 # {article_id, article_ins}
+def compute_popular(conn, start, end) -> pl.DataFrame:
+    df_in = fetch_article_in_counts(conn, start, end)                 # {article_id, article_ins}
     df_eng = fetch_engagements(conn, start, end)                      # {article_id, likes, shares, bookmarks}
 
     # full-outer join: 특정 소스에만 존재하는 article도 살림

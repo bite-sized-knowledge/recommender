@@ -2,9 +2,8 @@ import uuid
 import numpy as np
 import polars as pl
 from typing import Dict, Optional, List
-from boto3.dynamodb.conditions import Key
 from data.utils import (
-    _now_ms, _exp_decay, _to_point_id, _l2_normalize, 
+    _now_ms, _exp_decay, _to_point_id, _l2_normalize,
     _query_all_active_users, EVENT_WEIGHTS
 )
 
@@ -34,31 +33,23 @@ def _events_to_pl(events: list[dict]) -> pl.DataFrame:
     return df.filter(pl.col("event_type") != "").filter(pl.col("timestamp") > 0)
 
 
-def fetch_recent_events(table, member_id: int, lookback_days: int = LOOKBACK_DAYS) -> List[Dict]:
-    end_ms = _now_ms()
-    start_ms = end_ms - lookback_days * 24 * 60 * 60 * 1000
+def fetch_recent_events(conn, member_id: int, lookback_days: int = LOOKBACK_DAYS) -> List[Dict]:
+    sql = f"""
+    SELECT
+        LOWER(event_type) AS event_type,
+        CAST(article_id AS CHAR) AS target_id,
+        UNIX_TIMESTAMP(occurred_at) * 1000 AS timestamp
+    FROM user_events
+    WHERE member_id = {member_id}
+      AND occurred_at >= NOW() - INTERVAL {lookback_days} DAY
+      AND article_id IS NOT NULL
+    """
 
-    items: List[Dict] = []
-    last_evaluated_key = None
+    df = conn.execute(sql)
+    if df.is_empty():
+        return []
 
-    while True:
-        kwargs = {
-            "KeyConditionExpression": Key("member_id").eq(member_id) & Key("timestamp").between(start_ms, end_ms),
-            "ProjectionExpression": "member_id, #ts, target_type, target_id, event_type",
-            "ExpressionAttributeNames": {"#ts": "timestamp"},
-            "Limit": 1000,
-        }
-        if last_evaluated_key:
-            kwargs["ExclusiveStartKey"] = last_evaluated_key
-
-        resp = table.query(**kwargs)
-        items.extend(resp.get("Items", []))
-        last_evaluated_key = resp.get("LastEvaluatedKey")
-        if not last_evaluated_key:
-            break
-
-    # 기사 관련 이벤트만 유지
-    return [e for e in items if e.get("target_type") == "article" and e.get("target_id")]
+    return df.to_dicts()
 
 def aggregate_article_weights(events: List[Dict]) -> Dict[str, float]:
     if not events:
@@ -71,7 +62,7 @@ def aggregate_article_weights(events: List[Dict]) -> Dict[str, float]:
     for e in events:
         et = e.get("event_type")
         w_type = EVENT_WEIGHTS.get(et, 0.0)
-        if w_type <= 0:
+        if w_type == 0:
             continue
 
         ts = e.get("timestamp")
@@ -129,16 +120,16 @@ def fetch_vectors_by_article_ids(
 
 def build_user_behavior_embedding(
         qdrant,
-        table,
+        conn,
         member_id: int,
         lookback_days: int = LOOKBACK_DAYS
     ) -> Optional[np.ndarray]:
     """
-    단일 유저에 대한 behavior embedding 생성 
+    단일 유저에 대한 behavior embedding 생성
     """
 
     # (1) 이벤트 조회
-    events = fetch_recent_events(table, member_id, lookback_days)
+    events = fetch_recent_events(conn, member_id, lookback_days)
     user_logs = _events_to_pl(events)
     if not events:
         return None, user_logs
@@ -176,7 +167,6 @@ def build_user_behavior_embedding(
 def build_behavior_embedding(
         conn,
         qdrant,
-        table
     ) -> Dict[int, dict]:
     """
     모든 유저에 대해 behavior embedding 계산
@@ -188,7 +178,7 @@ def build_behavior_embedding(
     for user in active_users['member_id']:
         vector, user_logs = build_user_behavior_embedding(
             qdrant=qdrant,
-            table=table,
+            conn=conn,
             member_id=user
         )
 

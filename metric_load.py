@@ -1,4 +1,4 @@
-from metrics.recall_calculator import RecallEvaluator 
+from metrics.recall_calculator import RecallEvaluator
 from common.db import Connection
 
 
@@ -8,7 +8,6 @@ if __name__ == "__main__":
 
         evaluator = RecallEvaluator(
             conn=conn,
-            dynamo=conn.get_dynamo()
         )
 
         metrics = evaluator.evaluate(

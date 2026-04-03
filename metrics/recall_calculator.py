@@ -1,7 +1,6 @@
 import polars as pl
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any
-from boto3.dynamodb.conditions import Key, Attr
 import json
 
 
@@ -9,8 +8,7 @@ class RecallEvaluator:
     """
     추천 로그와 유저 클릭 이벤트를 활용하여 recall@k를 평가
     """
-    def __init__(self, conn: Any, dynamo: Any, parquet_path: str = "metrics/recommendation_logs.parquet"):
-        self.dynamo = dynamo
+    def __init__(self, conn: Any, parquet_path: str = "metrics/recommendation_logs.parquet"):
         self.conn = conn
         self.parquet_path = parquet_path
 
@@ -41,42 +39,32 @@ class RecallEvaluator:
         end_time: datetime,
     ) -> pl.DataFrame:
         """
-        지정한 유저와 기간에 대해 DynamoDB에서 클릭 이벤트를 조회
+        지정한 유저와 기간에 대해 MySQL에서 클릭 이벤트를 조회
         """
-        table = self.dynamo.Table("event")
-        items = []
-        # DynamoDB는 range key로 batch query를 지원하지 않으므로 유저별로 조회
-        for member_id in member_ids:
-            try:
-                response = table.query(
-                    KeyConditionExpression=Key("member_id").eq(member_id) &
-                                           Key("timestamp").between(
-                                               int(start_time.timestamp() * 1000), 
-                                               int(end_time.timestamp() * 1000)
-                                            ),
-                    FilterExpression=Attr("event_type").eq("article_in") & Attr("target_type").eq("article")
-                )
-                items.extend(response.get("Items", []))
-            except Exception as e:
-                # 유저별 조회 중 오류 발생 시 로그 출력 후 계속 진행
-                print(f"DynamoDB 조회 오류 (member_id: {member_id}): {e}")
-
-        if not items:
-            print("No items")
+        if not member_ids:
             return pl.DataFrame(schema={"member_id": pl.Int64, "target_id": pl.Utf8})
 
-        for item in items:
-            ts = int(item["timestamp"]) // 1000
-            item["date"] = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        ids_str = ",".join(str(mid) for mid in member_ids)
+        start_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
+        end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
 
-        df = pl.DataFrame(items)
+        sql = f"""
+        SELECT
+            member_id,
+            CAST(article_id AS CHAR) AS target_id
+        FROM user_events
+        WHERE member_id IN ({ids_str})
+          AND LOWER(event_type) = 'article_in'
+          AND article_id IS NOT NULL
+          AND occurred_at BETWEEN '{start_str}' AND '{end_str}'
+        """
 
-        # member_id, target_id 컬럼이 존재하는지 확인 후 반환
-        if "member_id" in df.columns and "target_id" in df.columns:
-            return df.select(["member_id", "target_id"])
-        else:
-            # 컬럼이 없을 경우 빈 DataFrame 반환
+        df = self.conn.execute(sql)
+
+        if df.is_empty():
             return pl.DataFrame(schema={"member_id": pl.Int64, "target_id": pl.Utf8})
+
+        return df.select(["member_id", "target_id"])
 
     def calculate_recall_at_k(
         self,
@@ -123,23 +111,6 @@ class RecallEvaluator:
     ) -> str:
         """
         지정한 날짜에 대해 recall 평가를 수행하고 JSON 문자열로 반환
-
-        ----------
-        metrics : dict
-            total_users : int
-                추천 결과에 등장하는 고유 유저(member_id) 수.
-            total_recommendations : int
-                추천 결과의 전체 (user, article) 쌍 개수.
-            unique_items_recommended : int
-                추천 결과에서 추천된 고유 article_id 개수.
-            recall_at_{k} : float
-                각 k에 대해, 추천 상위 k개 중 실제 클릭이 1개 이상 발생한 유저의 비율.
-            hit_users_at_{k} : int
-                각 k에 대해, 추천 상위 k개 중 실제 클릭이 1개 이상 발생한 유저 수.
-            metric_date : str
-                평가 기준 날짜(입력 recommend_date).
-            created_at : str
-                metric 생성 시각(ISO 포맷).
         """
         if use_db:
             self.load_recommendations_from_db(recommend_date)
@@ -153,7 +124,6 @@ class RecallEvaluator:
         end_time = rec_time + timedelta(hours=24)
 
         print(f"Timestamp {rec_time}")
-
 
         click_df = self.fetch_click_events(member_ids, rec_time, end_time)
         metrics = self.calculate_recall_at_k(rec_df, click_df, k_list)
