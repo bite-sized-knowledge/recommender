@@ -33,7 +33,7 @@ def save_recommendations_to_db(df, conn, table_name: str = "recommendation"):
     )
 
     sql = f"""
-        INSERT {table_name} (member_id, article_id)
+        INSERT INTO {table_name} (member_id, article_id)
         VALUES {values_str};
     """
 

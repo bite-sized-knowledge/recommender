@@ -21,15 +21,21 @@ def aggregate_engagement(conn) -> None:
         SUM(CASE WHEN LOWER(event_type) = 'article_in' THEN 1 ELSE 0 END) AS clicks,
         COALESCE(SUM(dwell_time_ms), 0) AS total_dwell_ms,
         COALESCE(MAX(scroll_depth), 0) AS max_scroll_depth,
-        MAX(CASE WHEN LOWER(event_type) = 'archive' THEN 1 ELSE 0 END) AS bookmarked,
-        MAX(CASE WHEN LOWER(event_type) = 'like' THEN 1 ELSE 0 END) AS liked,
+        CASE WHEN MAX(CASE WHEN LOWER(event_type) = 'archive' THEN occurred_at END)
+                  > COALESCE(MAX(CASE WHEN LOWER(event_type) = 'archive_cancel' THEN occurred_at END), '1970-01-01')
+             THEN 1 ELSE 0 END AS bookmarked,
+        CASE WHEN MAX(CASE WHEN LOWER(event_type) = 'like' THEN occurred_at END)
+                  > COALESCE(MAX(CASE WHEN LOWER(event_type) = 'like_cancel' THEN occurred_at END), '1970-01-01')
+             THEN 1 ELSE 0 END AS liked,
         MAX(CASE WHEN LOWER(event_type) = 'share' THEN 1 ELSE 0 END) AS shared,
         MIN(occurred_at) AS first_seen_at,
         MAX(occurred_at) AS last_seen_at,
         (
             SUM(CASE WHEN LOWER(event_type) = 'article_in' THEN 1.0 ELSE 0 END) * 1.0 +
-            SUM(CASE WHEN LOWER(event_type) = 'like' THEN 1.0 ELSE 0 END) * 2.0 +
-            SUM(CASE WHEN LOWER(event_type) = 'archive' THEN 1.0 ELSE 0 END) * 2.0 +
+            SUM(CASE WHEN LOWER(event_type) = 'like' THEN 2.0
+                      WHEN LOWER(event_type) = 'like_cancel' THEN -2.0 ELSE 0 END) +
+            SUM(CASE WHEN LOWER(event_type) = 'archive' THEN 2.0
+                      WHEN LOWER(event_type) = 'archive_cancel' THEN -2.0 ELSE 0 END) +
             SUM(CASE WHEN LOWER(event_type) = 'share' THEN 1.0 ELSE 0 END) * 2.0 +
             SUM(CASE WHEN LOWER(event_type) = 'f_imp' THEN 1.0 ELSE 0 END) * 0.05 +
             SUM(CASE WHEN LOWER(event_type) = 'uninterest' THEN 1.0 ELSE 0 END) * -3.0
