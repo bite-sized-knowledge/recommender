@@ -2,12 +2,16 @@ from typing import Dict, List, Iterable
 import numpy as np
 from collections import defaultdict
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams
+from qdrant_client.http.models import Distance, VectorParams, Filter, FieldCondition, MatchValue
 from data.utils import _l2_normalize
+from utils.logger import get_logger
 
-# Config 
+logger = get_logger("InitialEmbedding")
+
+# Config
 CAT_COLLECTION = "category-profiles"
 USR_COLLECTION = "user-profiles"
+ITEM_COLLECTION = "bite-vectordb"
 BATCH_UPSERT = 2000
 
 # 유틸
@@ -39,6 +43,26 @@ def fetch_user_interests(conn) -> Dict[int, List[int]]:
         out[mid].append(cid)
     return out
 
+def fetch_user_blog_subscriptions(conn) -> Dict[int, List[int]]:
+    """
+    blog_subscribe(blog_id, member_id, is_deleted)
+    return: {member_id: [blog_id, ...]}
+    """
+    res = conn.execute("""
+        SELECT bs.member_id, bs.blog_id
+        FROM blog_subscribe bs
+        JOIN member m ON bs.member_id = m.member_id
+        WHERE bs.is_deleted = 0
+        AND m.status = 'active'
+        AND m.role IN ('ROLE_USER', 'ROLE_GUEST')
+    """)
+    out = defaultdict(list)
+    if res.is_empty():
+        return out
+    for mid, bid in res.select(["member_id", "blog_id"]).iter_rows():
+        out[mid].append(bid)
+    return out
+
 def load_category_vectors(client: QdrantClient) -> Dict[int, np.ndarray]:
     cat_ids = list(range(1, 14))
     vecs: Dict[int, np.ndarray] = {}
@@ -50,6 +74,75 @@ def load_category_vectors(client: QdrantClient) -> Dict[int, np.ndarray]:
         raise RuntimeError("category-profiles에서 벡터를 찾지 못했습니다.")
     return vecs
 
+def compute_blog_centroid(client: QdrantClient, blog_id: int) -> np.ndarray | None:
+    """Compute centroid of all article vectors belonging to a blog."""
+    filt = Filter(must=[FieldCondition(key="blog_id", match=MatchValue(value=blog_id))])
+    vecs = []
+    next_offset = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=ITEM_COLLECTION,
+            limit=256,
+            with_vectors=True,
+            with_payload=False,
+            offset=next_offset,
+            scroll_filter=filt,
+        )
+        for p in points:
+            if p.vector is not None:
+                vecs.append(np.asarray(p.vector, dtype=np.float32))
+        if next_offset is None:
+            break
+
+    if len(vecs) < 3:
+        return None
+    return _l2_normalize(np.vstack(vecs).mean(axis=0).astype(np.float32))
+
+def compute_popular_centroid(conn, client: QdrantClient) -> np.ndarray | None:
+    """Compute centroid from highly-engaged articles as a global popularity fallback."""
+    res = conn.execute("""
+        SELECT CAST(article_id AS CHAR) AS article_id
+        FROM user_article_engagement
+        WHERE engagement_score > 3.0
+        ORDER BY engagement_score DESC
+        LIMIT 200
+    """)
+    if res.is_empty():
+        # Fallback to like_count
+        res = conn.execute("""
+            SELECT article_id
+            FROM article
+            WHERE like_count + bookmark_count > 0
+            ORDER BY (like_count + bookmark_count) DESC
+            LIMIT 200
+        """)
+    if res.is_empty():
+        return None
+
+    import uuid
+    from data.utils import _to_point_id
+    article_ids = res["article_id"].to_list()
+    ns = uuid.NAMESPACE_DNS
+    point_ids = [str(_to_point_id(aid, ns)) for aid in article_ids]
+
+    vecs = []
+    for i in range(0, len(point_ids), 256):
+        chunk = point_ids[i:i+256]
+        points = client.retrieve(
+            collection_name=ITEM_COLLECTION,
+            ids=chunk,
+            with_vectors=True,
+            with_payload=False,
+        )
+        for p in points:
+            if p.vector is not None:
+                vecs.append(np.asarray(p.vector, dtype=np.float32))
+
+    if not vecs:
+        return None
+    return _l2_normalize(np.vstack(vecs).mean(axis=0).astype(np.float32))
+
+
 def build_user_vector(cat_vecs: Dict[int, np.ndarray], picked: List[int]) -> np.ndarray | None:
     picked = [c for c in picked if c in cat_vecs]
     if not picked:
@@ -57,9 +150,9 @@ def build_user_vector(cat_vecs: Dict[int, np.ndarray], picked: List[int]) -> np.
     mat = np.stack([cat_vecs[c] for c in picked], axis=0)
     return _l2_normalize(mat.mean(axis=0).astype(np.float32))
 
-def build_user_initial_embedding(conn, client:QdrantClient, dim) -> Dict[int, List[float]]:
+def build_user_initial_embedding(conn, client: QdrantClient, dim) -> Dict[int, np.ndarray]:
 
-    # 카테고리 벡터 1회 로드 
+    # 카테고리 벡터 1회 로드
     cat_vecs = load_category_vectors(client)
 
     # user-profiles 컬렉션 없으면 생성
@@ -67,7 +160,7 @@ def build_user_initial_embedding(conn, client:QdrantClient, dim) -> Dict[int, Li
         client.create_collection(
             collection_name=USR_COLLECTION,
             vectors_config=VectorParams(
-                size=dim, 
+                size=dim,
                 distance=Distance.COSINE
             ),
         )
@@ -75,11 +168,59 @@ def build_user_initial_embedding(conn, client:QdrantClient, dim) -> Dict[int, Li
     # 유저 관심 카테고리 로드
     user_to_cats = fetch_user_interests(conn)
 
+    # 블로그 구독 로드
+    user_to_blogs = fetch_user_blog_subscriptions(conn)
+
+    # 블로그 centroid 캐시 (blog_id → vector)
+    blog_centroid_cache: Dict[int, np.ndarray | None] = {}
+
+    # 글로벌 popularity centroid (1회 계산)
+    popular_centroid = compute_popular_centroid(conn, client)
+    if popular_centroid is not None:
+        logger.info("Global popular centroid computed for cold start fallback")
+
     # 유저별 벡터 계산
-    user_vecs: Dict[int, List[float]] = {}
-    for mid, cats in user_to_cats.items():
-        vec = build_user_vector(cat_vecs, cats)
-        if vec is not None:
-            user_vecs[mid] = vec
+    all_user_ids = set(user_to_cats.keys()) | set(user_to_blogs.keys())
+
+    # 관심사도 구독도 없는 유저 포함
+    from data.utils import _query_all_active_users
+    active_users = conn.execute(_query_all_active_users())
+    for uid in active_users["member_id"].to_list():
+        all_user_ids.add(uid)
+
+    user_vecs: Dict[int, np.ndarray] = {}
+    for mid in all_user_ids:
+        cats = user_to_cats.get(mid, [])
+        blogs = user_to_blogs.get(mid, [])
+
+        cat_vec = build_user_vector(cat_vecs, cats)
+
+        # Blog subscription centroid
+        blog_vec = None
+        if blogs:
+            blog_vecs = []
+            for bid in blogs:
+                if bid not in blog_centroid_cache:
+                    blog_centroid_cache[bid] = compute_blog_centroid(client, bid)
+                bv = blog_centroid_cache[bid]
+                if bv is not None:
+                    blog_vecs.append(bv)
+            if blog_vecs:
+                blog_vec = _l2_normalize(np.vstack(blog_vecs).mean(axis=0).astype(np.float32))
+
+        # Blend category + blog
+        if cat_vec is not None and blog_vec is not None:
+            vec = _l2_normalize((0.6 * cat_vec + 0.4 * blog_vec).astype(np.float32))
+        elif cat_vec is not None:
+            vec = cat_vec
+        elif blog_vec is not None:
+            vec = blog_vec
+        elif popular_centroid is not None:
+            # Phase 1B: popularity fallback for truly cold users
+            vec = popular_centroid
+        else:
+            continue
+
+        user_vecs[mid] = vec
 
     return user_vecs

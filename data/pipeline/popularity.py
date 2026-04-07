@@ -128,6 +128,4 @@ def compute_popular(conn, start, end) -> pl.DataFrame:
     # 내림차순 정렬, TOPK
     df = df.sort("score", descending=True).limit(80)
 
-    return df.select(
-        "article_id"
-    )
+    return df.select("article_id", "score")

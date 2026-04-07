@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 import polars as pl
 from qdrant_client import QdrantClient
 from data.utils import _query_all_active_users
@@ -22,7 +22,8 @@ def get_user_vector(qdrant: QdrantClient, member_id: int, user_collection: str =
 def search_personalized_items(qdrant: QdrantClient, member_id: int,
                               item_collection: str = "bite-vectordb",
                               user_collection: str = "user-profiles",
-                              topk: int = 120) -> List[str]:
+                              topk: int = 120) -> List[Tuple[str, float]]:
+    """Returns list of (article_id, cosine_similarity_score)."""
     uvec = get_user_vector(qdrant, member_id, user_collection)
     if not uvec:
         return []
@@ -33,46 +34,49 @@ def search_personalized_items(qdrant: QdrantClient, member_id: int,
         limit=topk,
         with_payload=True
     )
-    return [h.payload.get("article_id") for h in hits if h.payload and h.payload.get("article_id")]
+    return [
+        (h.payload.get("article_id"), h.score)
+        for h in hits
+        if h.payload and h.payload.get("article_id")
+    ]
 
 def merge_candidates(
-    personal: List[str],
-    short_pop: List[str],
-    long_pop: List[str],
+    personal: List[Tuple[str, float]],
+    short_pop: List[Tuple[str, float]],
+    long_pop: List[Tuple[str, float]],
     min_per_user: int = 100,
     cap_personal: int = 100,
     cap_short: int = 30,
     cap_long: int = 20,
-) -> List[str]:
+) -> List[Tuple[str, float, str]]:
     """
-    개인화/단기/장기 후보 합치고 중복 제거.
-    우선순위: personal > short > long
+    Merge candidates with dedup. Returns [(article_id, score, source), ...].
+    Priority: personal > short > long
     """
     seen, merged = set(), []
 
-    for aid in personal[:cap_personal]:
+    for aid, score in personal[:cap_personal]:
         if aid not in seen:
             seen.add(aid)
-            merged.append(aid)
+            merged.append((aid, score, "personalized"))
 
-    for aid in short_pop[:cap_short]:
+    for aid, score in short_pop[:cap_short]:
         if aid not in seen:
             seen.add(aid)
-            merged.append(aid)
+            merged.append((aid, score, "short_pop"))
 
-    for aid in long_pop[:cap_long]:
+    for aid, score in long_pop[:cap_long]:
         if aid not in seen:
             seen.add(aid)
-            merged.append(aid)
+            merged.append((aid, score, "long_pop"))
 
-    # 부족하면 personal 여분으로 채우기
     if len(merged) < min_per_user:
-        for aid in personal[cap_personal:]:
+        for aid, score in personal[cap_personal:]:
             if len(merged) >= min_per_user:
                 break
             if aid not in seen:
                 seen.add(aid)
-                merged.append(aid)
+                merged.append((aid, score, "personalized"))
 
     return merged
 
@@ -80,20 +84,40 @@ def merge_candidates_for_all_users(
     conn: Any,
     qdrant: QdrantClient,
     popular: List[pl.DataFrame],
+    segments: pl.DataFrame = None,
     min_per_user: int = 100,
-    cap_personal: int = 100,
-    cap_short: int = 30,
-    cap_long: int = 20,
 ) -> pl.DataFrame:
     """
-    전체 유저에 대해 후보 생성.
-    반환: DataFrame {member_id, article_id, source, num_recs}
+    Generate candidates for all users with segment-aware caps.
+    Returns DataFrame {member_id, article_id, score, source}
     """
-    # 인기 리스트 준비
-    short_list = popular[0].select(pl.col("article_id").cast(pl.Utf8)).to_series().to_list()
-    long_list  = popular[1].select(pl.col("article_id").cast(pl.Utf8)).to_series().to_list()
+    # Popularity lists with scores
+    short_df = popular[0]
+    long_df = popular[1]
 
-    # 활성 유저 조회
+    short_list = [
+        (row["article_id"], row["score"] if "score" in short_df.columns else 0.0)
+        for row in short_df.iter_rows(named=True)
+    ]
+    long_list = [
+        (row["article_id"], row["score"] if "score" in long_df.columns else 0.0)
+        for row in long_df.iter_rows(named=True)
+    ]
+
+    # Build segment lookup
+    seg_map: Dict[int, str] = {}
+    if segments is not None and not segments.is_empty():
+        for row in segments.iter_rows(named=True):
+            seg_map[row["member_id"]] = row["user_segment"]
+
+    # Segment-dependent caps
+    SEGMENT_CAPS = {
+        "cold": {"cap_personal": 40, "cap_short": 40, "cap_long": 20},
+        "warm": {"cap_personal": 80, "cap_short": 25, "cap_long": 15},
+        "hot":  {"cap_personal": 100, "cap_short": 15, "cap_long": 5},
+    }
+    DEFAULT_CAPS = SEGMENT_CAPS["warm"]
+
     user_ids = get_active_users(conn).select(pl.col("member_id")).to_series().to_list()
 
     all_rows = []
@@ -104,25 +128,30 @@ def merge_candidates_for_all_users(
             item_collection="bite-vectordb",
             topk=120
         )
+
+        seg = seg_map.get(uid, "cold")
+        caps = SEGMENT_CAPS.get(seg, DEFAULT_CAPS)
+
         merged = merge_candidates(
             personal=personal,
             short_pop=short_list,
             long_pop=long_list,
             min_per_user=min_per_user,
-            cap_personal=cap_personal,
-            cap_short=cap_short,
-            cap_long=cap_long,
+            **caps,
         )
 
-        # 행 단위로 쌓기
-        for aid in merged:
+        for aid, score, source in merged:
             all_rows.append({
                 "member_id": uid,
                 "article_id": aid,
+                "score": score,
+                "source": source,
             })
 
-    df = pl.from_dicts(all_rows).with_columns([
-        pl.col("member_id").cast(pl.Int64),
-        pl.col("article_id").cast(pl.Utf8),
-    ])
+    df = pl.from_dicts(all_rows, schema={
+        "member_id": pl.Int64,
+        "article_id": pl.Utf8,
+        "score": pl.Float64,
+        "source": pl.Utf8,
+    })
     return df

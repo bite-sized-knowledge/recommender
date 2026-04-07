@@ -38,7 +38,9 @@ def fetch_recent_events(conn, member_id: int, lookback_days: int = LOOKBACK_DAYS
     SELECT
         LOWER(event_type) AS event_type,
         CAST(article_id AS CHAR) AS target_id,
-        UNIX_TIMESTAMP(occurred_at) * 1000 AS timestamp
+        UNIX_TIMESTAMP(occurred_at) * 1000 AS timestamp,
+        COALESCE(dwell_time_ms, 0) AS dwell_time_ms,
+        COALESCE(scroll_depth, 0) AS scroll_depth
     FROM user_events
     WHERE member_id = {member_id}
       AND occurred_at >= NOW() - INTERVAL {lookback_days} DAY
@@ -70,7 +72,20 @@ def aggregate_article_weights(events: List[Dict]) -> Dict[str, float]:
             continue
 
         days_ago = max(0.0, (now_ms - int(ts)) / ms_per_day)
-        w = w_type * _exp_decay(days_ago, HALF_LIFE_DAYS)
+
+        # Engagement depth multiplier from dwell_time and scroll_depth
+        engagement_mul = 1.0
+        if et == "article_in":
+            dwell_ms = e.get("dwell_time_ms", 0) or 0
+            if dwell_ms > 0:
+                dwell_factor = min(dwell_ms / 180000.0, 2.0)
+                engagement_mul *= (1.0 + dwell_factor)
+
+            scroll = e.get("scroll_depth", 0) or 0
+            if scroll > 50:
+                engagement_mul *= (1.0 + scroll / 200.0)
+
+        w = w_type * _exp_decay(days_ago, HALF_LIFE_DAYS) * engagement_mul
 
         aid = str(e["target_id"])
         weights[aid] = weights.get(aid, 0.0) + w

@@ -2,40 +2,42 @@ import polars as pl
 from datetime import datetime, timedelta
 from utils.logger import get_logger
 
+ALLOWED_TABLES = {"recommendation"}
+
 def save_recommendations_to_db(df, conn, table_name: str = "recommendation"):
     """
-    Insert (member_id, article_id) pairs from a merged parquet file into a recommendation table.
-
-    Args:
-        parquet_path (str): Path to the merged.parquet file
-        connection (Connection): Database connection object with _raw_execute
-        table_name (str): Table name to insert into
+    Insert (member_id, article_id, score) pairs into the recommendation table.
     """
     logger = get_logger(f"Saving Data into {table_name} table...")
-    
+
+    if table_name not in ALLOWED_TABLES:
+        raise ValueError(f"Invalid table name: {table_name}")
+
     if df.is_empty():
         print("No recommendations to insert.")
         return
-    
+
     threshold_date = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
     logger.info(f"Deleting old records before {threshold_date}")
-    delete_sql = f"""
-        DELETE FROM {table_name}
-        WHERE created_at < '{threshold_date}';
-    """
-    conn._raw_execute(delete_sql)
-
-
-    values = df.iter_rows()
-    values_str = ", ".join(
-        f"({member_id}, '{article_id}')"
-        for member_id, article_id in values
+    conn._raw_execute(
+        f"DELETE FROM {table_name} WHERE created_at < :threshold",
+        {"threshold": threshold_date}
     )
 
-    sql = f"""
-        INSERT INTO {table_name} (member_id, article_id)
-        VALUES {values_str};
-    """
+    # Batch insert with parameterized queries
+    insert_sql = f"INSERT INTO {table_name} (member_id, article_id, score) VALUES (:member_id, :article_id, :score)"
 
-    logger.info("Insert Query Start")
-    conn._raw_execute(sql)
+    has_score = "score" in df.columns
+    param_list = []
+    for row in df.iter_rows(named=True):
+        param_list.append({
+            "member_id": row["member_id"],
+            "article_id": row["article_id"],
+            "score": row.get("score") if has_score else None,
+        })
+
+    BATCH_SIZE = 500
+    logger.info(f"Insert Query Start ({len(param_list)} rows)")
+    for i in range(0, len(param_list), BATCH_SIZE):
+        batch = param_list[i:i + BATCH_SIZE]
+        conn._batch_execute(insert_sql, batch)

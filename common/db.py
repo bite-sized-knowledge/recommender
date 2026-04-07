@@ -36,14 +36,26 @@ class Connection:
         with self.engine.connect() as conn:
             return pl.read_database(query, conn)
 
-    def _raw_execute(self, query):
+    def _raw_execute(self, query, params=None):
         if not self.engine:
             raise Exception("No SQLAlchemy engine initialized")
 
         with self.engine.connect() as conn:
-            conn.execute(text(query))
+            conn.execute(text(query), params or {})
             if query.strip().lower().startswith(("insert", "update", "delete")):
                 conn.commit()
+
+    def _batch_execute(self, query, param_list):
+        """Execute a parameterized query for each set of params in param_list."""
+        if not self.engine:
+            raise Exception("No SQLAlchemy engine initialized")
+        if not param_list:
+            return
+
+        with self.engine.connect() as conn:
+            for params in param_list:
+                conn.execute(text(query), params)
+            conn.commit()
 
     def save_parquet(self, query: str, path: str):
         """ SQL 결과를 parquet 파일로 저장 """

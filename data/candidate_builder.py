@@ -6,7 +6,7 @@ from data.pipeline.initial_embedding import build_user_initial_embedding
 from data.pipeline.mix_user_embedding import build_all_user_embeddings
 from data.pipeline.popularity import compute_popular
 from data.candidate_merge import merge_candidates_for_all_users
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from utils.logger import get_logger
 
 class CandidateBuilder:
@@ -14,14 +14,16 @@ class CandidateBuilder:
     후보 필터링을 위해 데이터를 준비하고 저장하는 클래스
     """
     def __init__(
-            self, 
+            self,
             conn: Any,
             config: Dict[str, str],
+            segments: Optional[pl.DataFrame] = None,
         ):
 
         self.conn = conn
         self.qdrant = conn.get_qdrant()
         self.config = config
+        self.segments = segments
         self.logger = get_logger("Candidate Builder")
 
     def run(self):
@@ -33,7 +35,7 @@ class CandidateBuilder:
         )
 
 
-        # 2. User Initial Embedding = mean of picked categories
+        # 2. User Initial Embedding = mean of picked categories + blog_subscribe + popularity fallback
         user_init_embedding = build_user_initial_embedding(
             conn=self.conn,
             client=self.qdrant,
@@ -68,6 +70,7 @@ class CandidateBuilder:
             self.conn,
             self.qdrant,
             popular,
-        ) 
+            segments=self.segments,
+        )
 
         return candidates
