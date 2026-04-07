@@ -8,7 +8,7 @@ from qdrant_client.models import (
     PointStruct,
 )
 
-USER_COLLECTION = "user-profiles"
+from data.utils import USER_COLLECTION
 
 
 def _effective_samples(

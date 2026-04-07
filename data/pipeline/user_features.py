@@ -4,11 +4,10 @@ Stored as payload in user-profiles Qdrant collection.
 """
 import polars as pl
 from typing import Dict, Any
+from data.utils import USER_COLLECTION
 from utils.logger import get_logger
 
 logger = get_logger("UserFeatures")
-
-USER_COLLECTION = "user-profiles"
 
 
 def compute_user_features(conn) -> Dict[int, Dict[str, Any]]:
@@ -88,14 +87,12 @@ def update_user_profile_payloads(qdrant, features: Dict[int, Dict[str, Any]]):
     if not features:
         return
 
+    updated = 0
     for mid, feats in features.items():
         try:
-            qdrant.set_payload(
-                collection_name=USER_COLLECTION,
-                payload=feats,
-                points=[mid],
-            )
+            qdrant.set_payload(collection_name=USER_COLLECTION, payload=feats, points=[mid])
+            updated += 1
         except Exception:
-            pass  # user might not exist in collection yet
+            pass
 
-    logger.info(f"Updated {len(features)} user profile payloads")
+    logger.info(f"Updated {updated}/{len(features)} user profile payloads")

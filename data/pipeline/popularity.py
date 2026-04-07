@@ -5,11 +5,6 @@ from data.utils import EVENT_WEIGHTS
 import datetime as dt
 
 
-now_utc = dt.datetime.now()
-
-def to_epoch_ms(ts: dt.datetime) -> int:
-    return int(ts.timestamp() * 1000)
-
 def fetch_article_in_counts(conn, start, end) -> pl.DataFrame:
     """
     MySQL user_events에서 event_type='ARTICLE_IN'인 이벤트를
@@ -41,8 +36,9 @@ def fetch_engagements(conn, start, end) -> pl.DataFrame:
     반환 스키마: {article_id: Utf8, likes: Int64, shares: Int64, bookmarks: Int64}
     """
 
-    end_dt = now_utc - dt.timedelta(days=end)
-    start_dt = now_utc - dt.timedelta(days=start)
+    now = dt.datetime.now()
+    end_dt = now - dt.timedelta(days=end)
+    start_dt = now - dt.timedelta(days=start)
 
 
     SQL = f"""

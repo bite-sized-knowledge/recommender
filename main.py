@@ -1,5 +1,4 @@
 import time
-from data.pipeline.fetch_data import *
 from data.candidate_builder import CandidateBuilder
 from data.seg_routing import UserSegmentation
 from common.db import Connection

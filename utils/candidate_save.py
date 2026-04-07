@@ -1,5 +1,6 @@
 import polars as pl
 from datetime import datetime, timedelta
+from data.utils import RETENTION_DAYS
 from utils.logger import get_logger
 
 ALLOWED_TABLES = {"recommendation"}
@@ -17,7 +18,7 @@ def save_recommendations_to_db(df, conn, table_name: str = "recommendation"):
         print("No recommendations to insert.")
         return
 
-    threshold_date = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+    threshold_date = (datetime.now() - timedelta(days=RETENTION_DAYS)).strftime("%Y-%m-%d")
     logger.info(f"Deleting old records before {threshold_date}")
     conn._raw_execute(
         f"DELETE FROM {table_name} WHERE created_at < :threshold",

@@ -46,15 +46,14 @@ class Connection:
                 conn.commit()
 
     def _batch_execute(self, query, param_list):
-        """Execute a parameterized query for each set of params in param_list."""
+        """Execute a parameterized query with all params in one executemany call."""
         if not self.engine:
             raise Exception("No SQLAlchemy engine initialized")
         if not param_list:
             return
 
         with self.engine.connect() as conn:
-            for params in param_list:
-                conn.execute(text(query), params)
+            conn.execute(text(query), param_list)
             conn.commit()
 
     def save_parquet(self, query: str, path: str):

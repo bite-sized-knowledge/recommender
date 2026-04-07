@@ -3,7 +3,14 @@ import uuid
 import numpy as np
 from typing import Dict
 
-# 이벤트 가중치(예시) 및 감쇠/윈도우
+# Shared constants
+ITEM_COLLECTION = "bite-vectordb"
+USER_COLLECTION = "user-profiles"
+CAT_COLLECTION = "category-profiles"
+UUID_NAMESPACE = uuid.NAMESPACE_DNS
+QDRANT_BATCH = 256
+RETENTION_DAYS = 180
+
 EVENT_WEIGHTS = {
     "article_in": 1.0,   # 클릭
     "like": 2.0,
@@ -38,4 +45,27 @@ def _query_all_active_users() -> str:
         status='ACTIVE'
         AND role IN ('ROLE_USER', 'ROLE_GUEST')
     """
+
+def _scroll_centroid(client, collection: str, scroll_filter, min_vecs: int = 1):
+    """Scroll a Qdrant collection with a filter and return the L2-normalized centroid vector."""
+    vecs = []
+    next_offset = None
+    while True:
+        points, next_offset = client.scroll(
+            collection_name=collection,
+            limit=256,
+            with_vectors=True,
+            with_payload=False,
+            offset=next_offset,
+            scroll_filter=scroll_filter,
+        )
+        for p in points:
+            if p.vector is not None:
+                vecs.append(np.asarray(p.vector, dtype=np.float32))
+        if next_offset is None:
+            break
+
+    if len(vecs) < min_vecs:
+        return None
+    return _l2_normalize(np.vstack(vecs).mean(axis=0).astype(np.float32))
 

@@ -1,6 +1,6 @@
 import polars as pl
 import numpy as np
-from data.pipeline.fetch_data import *
+from data.pipeline.fetch_data import build_category_profiles
 from data.pipeline.behavior_embedding import build_behavior_embedding
 from data.pipeline.initial_embedding import build_user_initial_embedding
 from data.pipeline.mix_user_embedding import build_all_user_embeddings

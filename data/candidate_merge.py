@@ -1,15 +1,19 @@
 from typing import Dict, List, Any, Tuple
 import polars as pl
 from qdrant_client import QdrantClient
-from data.utils import _query_all_active_users
+from data.utils import _query_all_active_users, ITEM_COLLECTION, USER_COLLECTION
 from utils.logger import get_logger
 
 logger = get_logger("MergeCandidates")
 
+SRC_PERSONALIZED = "personalized"
+SRC_SHORT_POP = "short_pop"
+SRC_LONG_POP = "long_pop"
+
 def get_active_users(conn):
     return conn.execute(_query_all_active_users())
 
-def get_user_vector(qdrant: QdrantClient, member_id: int, user_collection: str = "user-profiles") -> List[float]:
+def get_user_vector(qdrant: QdrantClient, member_id: int, user_collection: str = USER_COLLECTION) -> List[float]:
     res = qdrant.retrieve(
         collection_name=user_collection,
         ids=[member_id],
@@ -20,8 +24,8 @@ def get_user_vector(qdrant: QdrantClient, member_id: int, user_collection: str =
     return res[0].vector
 
 def search_personalized_items(qdrant: QdrantClient, member_id: int,
-                              item_collection: str = "bite-vectordb",
-                              user_collection: str = "user-profiles",
+                              item_collection: str = ITEM_COLLECTION,
+                              user_collection: str = USER_COLLECTION,
                               topk: int = 120) -> List[Tuple[str, float]]:
     """Returns list of (article_id, cosine_similarity_score)."""
     uvec = get_user_vector(qdrant, member_id, user_collection)
@@ -55,20 +59,16 @@ def merge_candidates(
     """
     seen, merged = set(), []
 
-    for aid, score in personal[:cap_personal]:
-        if aid not in seen:
-            seen.add(aid)
-            merged.append((aid, score, "personalized"))
-
-    for aid, score in short_pop[:cap_short]:
-        if aid not in seen:
-            seen.add(aid)
-            merged.append((aid, score, "short_pop"))
-
-    for aid, score in long_pop[:cap_long]:
-        if aid not in seen:
-            seen.add(aid)
-            merged.append((aid, score, "long_pop"))
+    sources = [
+        (personal[:cap_personal], SRC_PERSONALIZED),
+        (short_pop[:cap_short], SRC_SHORT_POP),
+        (long_pop[:cap_long], SRC_LONG_POP),
+    ]
+    for items, label in sources:
+        for aid, score in items:
+            if aid not in seen:
+                seen.add(aid)
+                merged.append((aid, score, label))
 
     if len(merged) < min_per_user:
         for aid, score in personal[cap_personal:]:
@@ -76,7 +76,7 @@ def merge_candidates(
                 break
             if aid not in seen:
                 seen.add(aid)
-                merged.append((aid, score, "personalized"))
+                merged.append((aid, score, SRC_PERSONALIZED))
 
     return merged
 
@@ -125,7 +125,7 @@ def merge_candidates_for_all_users(
         personal = search_personalized_items(
             qdrant=qdrant,
             member_id=uid,
-            item_collection="bite-vectordb",
+            item_collection=ITEM_COLLECTION,
             topk=120
         )
 

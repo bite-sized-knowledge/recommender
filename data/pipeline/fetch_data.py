@@ -5,10 +5,7 @@ from qdrant_client.models import (
     Distance, VectorParams, PointStruct,
     Filter, FieldCondition, MatchValue
 )
-from data.utils import _l2_normalize
-
-ITEM_COLLECTION = "bite-vectordb"
-CAT_COLLECTION  = "category-profiles"
+from data.utils import _l2_normalize, _scroll_centroid, ITEM_COLLECTION, CAT_COLLECTION
 CATEGORY = [i for i in range(1, 14)]
 MIN_POINTS = 5
 

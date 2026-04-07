@@ -4,18 +4,15 @@ import polars as pl
 from typing import Dict, Optional, List
 from data.utils import (
     _now_ms, _exp_decay, _to_point_id, _l2_normalize,
-    _query_all_active_users, EVENT_WEIGHTS
+    _query_all_active_users, EVENT_WEIGHTS,
+    ITEM_COLLECTION, UUID_NAMESPACE, QDRANT_BATCH,
 )
-
-# Config
-ITEM_COLLECTION = "bite-vectordb"
-USER_COLLECTION = "user-profiles"
-UUID_NAMESPACE = uuid.NAMESPACE_DNS
-
 
 HALF_LIFE_DAYS = 3.0
 LOOKBACK_DAYS = 7
 TOPN_ARTICLES = 50
+MAX_DWELL_MS = 180_000
+SCROLL_NORM_DIVISOR = 200.0
 
 def _events_to_pl(events: list[dict]) -> pl.DataFrame:
     """
@@ -78,12 +75,12 @@ def aggregate_article_weights(events: List[Dict]) -> Dict[str, float]:
         if et == "article_in":
             dwell_ms = e.get("dwell_time_ms", 0) or 0
             if dwell_ms > 0:
-                dwell_factor = min(dwell_ms / 180000.0, 2.0)
+                dwell_factor = min(dwell_ms / MAX_DWELL_MS, 2.0)
                 engagement_mul *= (1.0 + dwell_factor)
 
             scroll = e.get("scroll_depth", 0) or 0
             if scroll > 50:
-                engagement_mul *= (1.0 + scroll / 200.0)
+                engagement_mul *= (1.0 + scroll / SCROLL_NORM_DIVISOR)
 
         w = w_type * _exp_decay(days_ago, HALF_LIFE_DAYS) * engagement_mul
 
@@ -112,8 +109,8 @@ def fetch_vectors_by_article_ids(
     out: Dict[str, np.ndarray] = {}
 
     ids = list(id_map.keys())
-    for i in range(0, len(ids), batch):
-        chunk_ids = ids[i:i+batch]
+    for i in range(0, len(ids), QDRANT_BATCH):
+        chunk_ids = ids[i:i+QDRANT_BATCH]
 
         points = qdrant.retrieve(
             collection_name=ITEM_COLLECTION,

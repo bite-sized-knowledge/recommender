@@ -1,29 +1,20 @@
-from typing import Dict, List, Iterable
+import uuid
+from typing import Dict, List
 import numpy as np
 from collections import defaultdict
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, Filter, FieldCondition, MatchValue
-from data.utils import _l2_normalize
+from data.utils import (
+    _l2_normalize, _to_point_id, _scroll_centroid,
+    ITEM_COLLECTION, USER_COLLECTION, CAT_COLLECTION, UUID_NAMESPACE, QDRANT_BATCH,
+)
 from utils.logger import get_logger
 
 logger = get_logger("InitialEmbedding")
 
-# Config
-CAT_COLLECTION = "category-profiles"
-USR_COLLECTION = "user-profiles"
-ITEM_COLLECTION = "bite-vectordb"
-BATCH_UPSERT = 2000
-
-# 유틸
-def batched(iterable: Iterable, n: int) -> Iterable[list]:
-    buf = []
-    for x in iterable:
-        buf.append(x)
-        if len(buf) >= n:
-            yield buf
-            buf = []
-    if buf:
-        yield buf
+W_CATEGORY = 0.6
+W_BLOG = 0.4
+MIN_BLOG_ARTICLES = 3
 
 def fetch_user_interests(conn) -> Dict[int, List[int]]:
     """
@@ -53,7 +44,7 @@ def fetch_user_blog_subscriptions(conn) -> Dict[int, List[int]]:
         FROM blog_subscribe bs
         JOIN member m ON bs.member_id = m.member_id
         WHERE bs.is_deleted = 0
-        AND m.status = 'active'
+        AND m.status = 'ACTIVE'
         AND m.role IN ('ROLE_USER', 'ROLE_GUEST')
     """)
     out = defaultdict(list)
@@ -77,26 +68,7 @@ def load_category_vectors(client: QdrantClient) -> Dict[int, np.ndarray]:
 def compute_blog_centroid(client: QdrantClient, blog_id: int) -> np.ndarray | None:
     """Compute centroid of all article vectors belonging to a blog."""
     filt = Filter(must=[FieldCondition(key="blog_id", match=MatchValue(value=blog_id))])
-    vecs = []
-    next_offset = None
-    while True:
-        points, next_offset = client.scroll(
-            collection_name=ITEM_COLLECTION,
-            limit=256,
-            with_vectors=True,
-            with_payload=False,
-            offset=next_offset,
-            scroll_filter=filt,
-        )
-        for p in points:
-            if p.vector is not None:
-                vecs.append(np.asarray(p.vector, dtype=np.float32))
-        if next_offset is None:
-            break
-
-    if len(vecs) < 3:
-        return None
-    return _l2_normalize(np.vstack(vecs).mean(axis=0).astype(np.float32))
+    return _scroll_centroid(client, ITEM_COLLECTION, filt, min_vecs=MIN_BLOG_ARTICLES)
 
 def compute_popular_centroid(conn, client: QdrantClient) -> np.ndarray | None:
     """Compute centroid from highly-engaged articles as a global popularity fallback."""
@@ -119,15 +91,12 @@ def compute_popular_centroid(conn, client: QdrantClient) -> np.ndarray | None:
     if res.is_empty():
         return None
 
-    import uuid
-    from data.utils import _to_point_id
     article_ids = res["article_id"].to_list()
-    ns = uuid.NAMESPACE_DNS
-    point_ids = [str(_to_point_id(aid, ns)) for aid in article_ids]
+    point_ids = [str(_to_point_id(aid, UUID_NAMESPACE)) for aid in article_ids]
 
     vecs = []
-    for i in range(0, len(point_ids), 256):
-        chunk = point_ids[i:i+256]
+    for i in range(0, len(point_ids), QDRANT_BATCH):
+        chunk = point_ids[i:i + QDRANT_BATCH]
         points = client.retrieve(
             collection_name=ITEM_COLLECTION,
             ids=chunk,
@@ -156,9 +125,9 @@ def build_user_initial_embedding(conn, client: QdrantClient, dim) -> Dict[int, n
     cat_vecs = load_category_vectors(client)
 
     # user-profiles 컬렉션 없으면 생성
-    if not client.collection_exists(USR_COLLECTION):
+    if not client.collection_exists(USER_COLLECTION):
         client.create_collection(
-            collection_name=USR_COLLECTION,
+            collection_name=USER_COLLECTION,
             vectors_config=VectorParams(
                 size=dim,
                 distance=Distance.COSINE
@@ -210,7 +179,7 @@ def build_user_initial_embedding(conn, client: QdrantClient, dim) -> Dict[int, n
 
         # Blend category + blog
         if cat_vec is not None and blog_vec is not None:
-            vec = _l2_normalize((0.6 * cat_vec + 0.4 * blog_vec).astype(np.float32))
+            vec = _l2_normalize((W_CATEGORY * cat_vec + W_BLOG * blog_vec).astype(np.float32))
         elif cat_vec is not None:
             vec = cat_vec
         elif blog_vec is not None:
