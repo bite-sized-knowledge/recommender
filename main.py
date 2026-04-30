@@ -88,7 +88,7 @@ def run_pipeline() -> None:
             try:
                 sink.record("pipeline_total", total_ms, {"stages": list(overall.keys())})
             except Exception:
-                pass
+                logger.debug("pipeline_total record skipped", exc_info=True)
         logger.info(f"=== pipeline_total_ms={total_ms} ===")
         logger.info(f"=== summary: {overall} ===")
 
@@ -96,7 +96,7 @@ def run_pipeline() -> None:
             try:
                 conn.close()
             except Exception:
-                pass
+                logger.debug("conn close skipped", exc_info=True)
 
 
 if __name__ == "__main__":
