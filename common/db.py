@@ -1,7 +1,10 @@
-from sqlalchemy import create_engine, text
-import polars as pl
 import os
+import ssl
+
+import polars as pl
 from qdrant_client import QdrantClient
+from sqlalchemy import create_engine, text
+
 
 class Connection:
     def __init__(self):
@@ -10,24 +13,29 @@ class Connection:
         self.RDS_USER = os.getenv("RDS_USER") or os.getenv("DB_USER")
         self.RDS_PASSWORD = os.getenv("RDS_PASSWORD") or os.getenv("DB_PASSWORD")
         self.RDS_PORT = os.getenv("RDS_PORT") or os.getenv("DB_PORT")
+        self.MYSQL_CA_PATH = os.getenv("MYSQL_CA_PATH") or os.getenv("DB_TLS_CA")
         self.QDRANT_ENDPOINT = os.getenv("QDRANT_ENDPOINT") or os.getenv("QDRANT_URL")
         self.QDRANT_API = os.getenv("QDRANT_API") or os.getenv("QDRANT_API_KEY")
 
-        # SSH 터널 및 DB 연결
         self.engine = None
         self._connect_to_rds()
 
     def _connect_to_rds(self):
-        """ SSH 터널을 통해 RDS에 연결하고 SQLAlchemy 엔진 생성 """
-        try:
-            # SQLAlchemy 엔진 생성
-            self.engine = create_engine(
-                f"mysql+pymysql://{self.RDS_USER}:{self.RDS_PASSWORD}@"
-                f"{self.RDS_HOST}:{self.RDS_PORT}/{self.RDS_DATABASE}"
-            )
-
-        except Exception as e:
-            print("Error occurred:", e)
+        """MySQL 8.0 require_secure_transport=ON 이라 SSL context 필수.
+        CA 가 마운트돼있으면 검증, 없으면 self-signed 무시 (recsys-serving 패턴 동일)."""
+        if self.MYSQL_CA_PATH and os.path.exists(self.MYSQL_CA_PATH):
+            ssl_ctx = ssl.create_default_context(cafile=self.MYSQL_CA_PATH)
+            ssl_ctx.check_hostname = False  # self-signed CN doesn't match Docker service name
+        else:
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+        self.engine = create_engine(
+            f"mysql+pymysql://{self.RDS_USER}:{self.RDS_PASSWORD}@"
+            f"{self.RDS_HOST}:{self.RDS_PORT}/{self.RDS_DATABASE}",
+            pool_pre_ping=True,
+            connect_args={"ssl": ssl_ctx},
+        )
 
     def execute(self, query):
         if not self.engine:

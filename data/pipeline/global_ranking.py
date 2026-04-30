@@ -70,9 +70,14 @@ def _compute_scores(df: pl.DataFrame, half_life_days: float, weights: Dict[str, 
         + pl.col("recent_clicks").cast(pl.Float64).log1p()
     )
 
+    # invalid datetime ('0000-00-00') 은 PyMySQL 에서 None 으로 들어와 days_old=NULL → score=NULL.
+    # 그런 row 는 매우 오래된 글로 간주 (freshness ≈ 0).
     df = df.with_columns([
         pl.col("recent_clicks").fill_null(0),
-        (0.5 ** (pl.col("days_old").cast(pl.Float64) / float(half_life_days))).alias("freshness"),
+        pl.col("days_old").cast(pl.Float64).fill_null(9999.0),
+    ])
+    df = df.with_columns([
+        pl.lit(0.5).pow(pl.col("days_old") / float(half_life_days)).alias("freshness"),
         (pl.col("quality_score").cast(pl.Float64) / 10.0).alias("quality_norm"),
         pop_log.alias("pop_raw"),
     ])
@@ -93,7 +98,10 @@ def _compute_scores(df: pl.DataFrame, half_life_days: float, weights: Dict[str, 
         ).alias("score")
     ])
 
-    return df.select(["article_id", "category_id", "score", "freshness", "quality_norm", "popularity_norm", "days_old"])
+    return (
+        df.select(["article_id", "category_id", "score", "freshness", "quality_norm", "popularity_norm", "days_old"])
+        .drop_nulls(subset=["score", "category_id", "article_id"])
+    )
 
 
 def _enforce_per_category_min(df: pl.DataFrame, pool_size: int, per_category_min: int) -> pl.DataFrame:
@@ -109,11 +117,11 @@ def _enforce_per_category_min(df: pl.DataFrame, pool_size: int, per_category_min
     if per_category_min <= 0:
         return df.head(pool_size)
 
-    # category별 top-N
-    head = df.group_by("category_id", maintain_order=True).head(per_category_min)
+    # category별 top-N. polars group_by().head() 는 group key 컬럼을 첫 자리로 옮기므로
+    # 원본 컬럼 순서로 다시 select 해 vstack 호환 보장.
+    head = df.group_by("category_id", maintain_order=True).head(per_category_min).select(df.columns)
     selected_ids = set(head["article_id"].to_list())
 
-    # 남은 슬롯
     remaining_slots = pool_size - len(head)
     if remaining_slots <= 0:
         return head.head(pool_size)
