@@ -1,10 +1,11 @@
 """
-recommender 배치 파이프라인 — Phase 1+2.
+recommender 배치 파이프라인 — Phase 1+2 (+ Phase 1.6: 비회원 device bandit reconcile).
 
 Stage:
   1. global_ranking.build_pool        : recommendation_global atomic swap
   2. engagement_aggregator            : user_events → user_article_engagement upsert (보조)
   3. bandit_reconcile.reconcile       : member_category_bandit ground-truth overwrite
+  3b. bandit_reconcile.reconcile_devices : device_category_bandit ground-truth overwrite (Phase 1.6)
   4. user_vector.build_profiles       : Phase 2 — Qdrant user_profile EMA upsert
   5. metric_rollup.rollup             : recommendation_metric_daily + bandit_state_snapshot
 
@@ -16,7 +17,10 @@ from __future__ import annotations
 import time
 
 from common.db import Connection
-from data.pipeline.bandit_reconcile import reconcile as bandit_reconcile
+from data.pipeline.bandit_reconcile import (
+    reconcile as bandit_reconcile,
+    reconcile_devices as bandit_reconcile_devices,
+)
 from data.pipeline.engagement_aggregator import aggregate_engagement
 from data.pipeline.global_ranking import build_pool as build_global_pool
 from data.pipeline.metric_rollup import rollup as metric_rollup
@@ -67,10 +71,15 @@ def run_pipeline() -> None:
         _, payload = _run_stage(sink, "engagement_aggregator", aggregate_engagement, conn)
         overall["engagement_aggregator"] = payload
 
-        # 3. bandit reconcile
+        # 3. bandit reconcile (members)
         logger.info("=== [3/5] bandit_reconcile ===")
         _, payload = _run_stage(sink, "bandit_reconcile", bandit_reconcile, conn, config)
         overall["bandit_reconcile"] = payload
+
+        # 3b. bandit reconcile (devices, Phase 1.6) — best-effort
+        logger.info("=== [3b/5] bandit_reconcile_devices ===")
+        _, payload = _run_stage(sink, "bandit_reconcile_devices", bandit_reconcile_devices, conn, config)
+        overall["bandit_reconcile_devices"] = payload
 
         # 4. user vector (Phase 2)
         logger.info("=== [4/5] user_vector.build_profiles ===")
