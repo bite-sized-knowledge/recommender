@@ -1,20 +1,22 @@
 """
-recommender 배치 파이프라인 — Phase 1+2 (+ Phase 1.6: 비회원 device bandit reconcile).
+recommender 배치 파이프라인 — Phase 1+2 (+ Phase 1.6 device bandit / 1.8 stage 병렬).
 
 Stage:
-  1. global_ranking.build_pool        : recommendation_global atomic swap
-  2. engagement_aggregator            : user_events → user_article_engagement upsert (보조)
-  3. bandit_reconcile.reconcile       : member_category_bandit ground-truth overwrite
-  3b. bandit_reconcile.reconcile_devices : device_category_bandit ground-truth overwrite (Phase 1.6)
-  4. user_vector.build_profiles       : Phase 2 — Qdrant user_profile EMA upsert
-  5. metric_rollup.rollup             : recommendation_metric_daily + bandit_state_snapshot
+  1. global_ranking.build_pool                : recommendation_global atomic swap (critical, 직렬)
+  병렬 그룹 (서로 독립 — 다른 테이블 write):
+    2.  engagement_aggregator                  : user_events → user_article_engagement
+    3.  bandit_reconcile.reconcile             : member_category_bandit
+    3b. bandit_reconcile.reconcile_devices     : device_category_bandit
+    4.  user_vector.build_profiles             : Qdrant user_profile (Phase 2)
+  5. metric_rollup.rollup                     : 위 4 stage 모두 끝난 후 일별 KPI
 
-각 stage 시간/payload 는 recommender_run_metric 에 저장.
-실패한 stage 는 graceful skip — 다음 stage 계속 (단, 글로벌 풀은 critical → 실패 시 abort).
+각 stage 시간/payload 는 recommender_run_metric 에 저장. 실패는 graceful skip.
+SQLAlchemy engine 의 connection pool 이 동시 4 conn 처리 가능 (default 5+ overflow).
 """
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from common.db import Connection
 from data.pipeline.bandit_reconcile import (
@@ -58,7 +60,7 @@ def run_pipeline() -> None:
         sink = MetricSink(conn)
         logger.info(f"=== Run id: {sink.run_id} ===")
 
-        # 1. global pool (critical)
+        # 1. global pool (critical, 직렬)
         logger.info("=== [1/5] global_ranking.build_pool ===")
         ok, payload = _run_stage(sink, "global_ranking", build_global_pool, conn, config)
         overall["global_ranking"] = payload
@@ -66,25 +68,23 @@ def run_pipeline() -> None:
             logger.error("global_ranking 실패 — 후속 stage 진행 불가. abort.")
             return
 
-        # 2. engagement aggregator (best-effort)
-        logger.info("=== [2/5] engagement_aggregator ===")
-        _, payload = _run_stage(sink, "engagement_aggregator", aggregate_engagement, conn)
-        overall["engagement_aggregator"] = payload
-
-        # 3. bandit reconcile (members)
-        logger.info("=== [3/5] bandit_reconcile ===")
-        _, payload = _run_stage(sink, "bandit_reconcile", bandit_reconcile, conn, config)
-        overall["bandit_reconcile"] = payload
-
-        # 3b. bandit reconcile (devices, Phase 1.6) — best-effort
-        logger.info("=== [3b/5] bandit_reconcile_devices ===")
-        _, payload = _run_stage(sink, "bandit_reconcile_devices", bandit_reconcile_devices, conn, config)
-        overall["bandit_reconcile_devices"] = payload
-
-        # 4. user vector (Phase 2)
-        logger.info("=== [4/5] user_vector.build_profiles ===")
-        _, payload = _run_stage(sink, "user_vector", build_user_profiles, conn, config)
-        overall["user_vector"] = payload
+        # 2~4. 병렬 (서로 독립, 모두 다른 테이블 write — race 없음)
+        logger.info("=== [2-4/5] engagement_aggregator + bandit (member/device) + user_vector — 병렬 ===")
+        parallel = [
+            ("engagement_aggregator", aggregate_engagement, (conn,), {}),
+            ("bandit_reconcile", bandit_reconcile, (conn, config), {}),
+            ("bandit_reconcile_devices", bandit_reconcile_devices, (conn, config), {}),
+            ("user_vector", build_user_profiles, (conn, config), {}),
+        ]
+        with ThreadPoolExecutor(max_workers=len(parallel)) as ex:
+            futures = {
+                ex.submit(_run_stage, sink, name, fn, *args, **kw): name
+                for name, fn, args, kw in parallel
+            }
+            for fut in futures:
+                name = futures[fut]
+                _, payload = fut.result()
+                overall[name] = payload
 
         # 5. metric rollup (last — reads other stages' outputs)
         logger.info("=== [5/5] metric_rollup ===")

@@ -3,7 +3,15 @@ import ssl
 
 import polars as pl
 from qdrant_client import QdrantClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
+
+
+# engagement_aggregator 의 MAX(CASE WHEN ... THEN occurred_at END) 가 빈 group 또는 invalid datetime 를
+# 만나면 NO_ZERO_DATE sql_mode 에서 cast reject. 배치는 운영 데이터 관용적으로 처리해야 하므로
+# session-level 에서 NO_ZERO_DATE / NO_ZERO_IN_DATE 만 제거 (다른 strict mode 는 유지).
+_BATCH_SQL_MODE = (
+    "STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+)
 
 
 class Connection:
@@ -36,6 +44,14 @@ class Connection:
             pool_pre_ping=True,
             connect_args={"ssl": ssl_ctx},
         )
+
+        @event.listens_for(self.engine, "connect")
+        def _set_session_sql_mode(dbapi_conn, _record):
+            cur = dbapi_conn.cursor()
+            try:
+                cur.execute(f"SET SESSION sql_mode = '{_BATCH_SQL_MODE}'")
+            finally:
+                cur.close()
 
     def execute(self, query):
         if not self.engine:
