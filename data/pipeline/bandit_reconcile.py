@@ -134,11 +134,23 @@ def _fetch_pool_categories(conn) -> pl.DataFrame:
     return conn.execute(sql)
 
 
-def _fetch_active_devices(conn) -> pl.DataFrame:
-    """device_category_bandit 에 row 가 있는 device 만 reconcile (lazy init 된 device).
-    아직 활동 안 한 device 까지 cartesian 으로 뽑으면 row 폭증 — bandit 자체가 active 의 의미.
+def _fetch_active_devices(conn, lookback_days: int) -> pl.DataFrame:
+    """lookback 안에 user_events 또는 recommendation_impression 이 있는 device 만 reconcile.
+
+    device_category_bandit row 만으로 필터하면 lazy init 만 되고 활동 없는 device 도 포함되어
+    cartesian (devices × pool_categories) 가 폭증. lookback 활동 필터로 dead device 제거.
     """
-    sql = "SELECT DISTINCT device_id FROM device_category_bandit"
+    sql = f"""
+    SELECT DISTINCT device_id FROM (
+        SELECT device_id FROM user_events
+         WHERE device_id IS NOT NULL
+           AND occurred_at >= NOW() - INTERVAL {int(lookback_days)} DAY
+        UNION
+        SELECT device_id FROM recommendation_impression
+         WHERE device_id IS NOT NULL
+           AND shown_at >= NOW() - INTERVAL {int(lookback_days)} DAY
+    ) t
+    """
     return conn.execute(sql)
 
 
@@ -392,7 +404,7 @@ def reconcile_devices(conn, config: Dict) -> Dict:
     prior_a = float(cfg.get("device_prior_alpha", 1.0))
     prior_b = float(cfg.get("device_prior_beta", 1.0))
 
-    devices = _fetch_active_devices(conn)
+    devices = _fetch_active_devices(conn, lookback_days)
     categories = _fetch_pool_categories(conn)
     if devices.is_empty() or categories.is_empty():
         logger.warning(f"devices={len(devices)} categories={len(categories)} — device reconcile 생략")
