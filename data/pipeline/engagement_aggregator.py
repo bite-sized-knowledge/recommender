@@ -1,15 +1,17 @@
+from sqlalchemy import text
+
 from utils.logger import get_logger
 
 logger = get_logger("EngagementAggregator")
 
+# MAX(CASE WHEN ... THEN occurred_at END) 빈 그룹의 cast 가 NO_ZERO_DATE/NO_ZERO_IN_DATE 를
+# 포함한 sql_mode 에서 reject. SQLAlchemy connect-event 의 session-level SET 만으로는 일부
+# connection 에 안 적용되는 케이스가 관측되어 같은 connection 안에서 statement-level 명시.
+_RELAXED_SQL_MODE = "STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+
 
 def aggregate_engagement(conn) -> None:
-    """
-    user_events 테이블에서 유저×아티클별 engagement를 집계하여
-    user_article_engagement 테이블에 UPSERT.
-    배치 파이프라인의 마지막 단계에서 호출.
-    """
-
+    """user_events 의 유저×아티클 engagement 를 집계해서 user_article_engagement 에 UPSERT."""
     sql = """
     INSERT INTO user_article_engagement
         (member_id, article_id, impressions, clicks, total_dwell_ms, max_scroll_depth,
@@ -55,5 +57,9 @@ def aggregate_engagement(conn) -> None:
         engagement_score = VALUES(engagement_score)
     """
 
-    conn._raw_execute(sql)
+    # 같은 connection 안에서 SET → SELECT/UPSERT (다른 connection 에 새는 일 없음)
+    with conn.engine.connect() as c:
+        c.execute(text(f"SET SESSION sql_mode = '{_RELAXED_SQL_MODE}'"))
+        c.execute(text(sql))
+        c.commit()
     logger.info("user_article_engagement 집계 완료")
