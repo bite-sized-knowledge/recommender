@@ -1,7 +1,0 @@
-numpy
-polars
-pymysql
-sqlalchemy
-pyyaml
-pyarrow
-qdrant-client
