@@ -43,7 +43,7 @@ def aggregate_engagement(conn) -> None:
             SUM(CASE WHEN LOWER(event_type) = 'uninterest' THEN 1.0 ELSE 0 END) * -3.0
         ) AS engagement_score
     FROM user_events
-    WHERE article_id IS NOT NULL
+    WHERE article_id IS NOT NULL AND member_id IS NOT NULL
     GROUP BY member_id, article_id
     ON DUPLICATE KEY UPDATE
         impressions = VALUES(impressions),
