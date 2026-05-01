@@ -45,6 +45,8 @@ def _fetch_impressions_window(conn, start: dt.datetime, end: dt.datetime) -> pl.
         position,
         feed_request_id,
         bandit_theta,
+        was_backfilled,
+        latency_ms,
         shown_at
     FROM recommendation_impression
     WHERE shown_at >= :start AND shown_at < :end
@@ -327,9 +329,24 @@ def rollup(conn, config: Dict) -> Dict:
     anon_clk = int(anon_df["clicked"].sum()) if anon_imp else 0
     anon_ctr_v = round(anon_clk / anon_imp, 4) if anon_imp > 0 else None
 
-    # backfill_ratio: 같은 feed_request_id 안에서 카테고리 다양성이 1인 응답 비율 (heuristic).
-    # 더 정확히는 service.py 가 backfill 발생 시 표시해서 적재해야 하지만, 그건 별도 metric.
+    # backfill_ratio: 응답(feed_request_id) 단위로 was_backfilled=1 row 가 하나라도 있으면 backfill 발생.
+    # latency_ms: 응답 단위로 동일 (recsys 가 응답 직전 측정). feed_request_id 별 첫 row 의 값으로 percentile.
     backfill_ratio_v: float | None = None
+    latency_p50_v: float | None = None
+    latency_p95_v: float | None = None
+    if "feed_request_id" in joined.columns:
+        per_response = joined.filter(pl.col("feed_request_id").is_not_null()).group_by("feed_request_id").agg([
+            pl.col("was_backfilled").max().alias("any_backfill"),
+            pl.col("latency_ms").max().alias("latency_ms"),
+        ])
+        if len(per_response) > 0:
+            n = len(per_response)
+            bf = int(per_response["any_backfill"].sum() or 0)
+            backfill_ratio_v = round(bf / n, 4)
+            lat = per_response.filter(pl.col("latency_ms").is_not_null())["latency_ms"]
+            if len(lat) > 0:
+                latency_p50_v = round(float(lat.quantile(0.5)), 2)
+                latency_p95_v = round(float(lat.quantile(0.95)), 2)
 
     # onboarding vs non-onboarding split — 회원만 의미.
     member_df = joined.filter(~is_anon)
@@ -366,9 +383,11 @@ def rollup(conn, config: Dict) -> Dict:
          ctr, anonymous_ctr, onboarding_ctr, non_onboarding_ctr,
          per_category, per_position_ctr, diversity_entropy, freshness_median_days,
          bandit_active_users, anonymous_active_devices, pool_size,
-         cold_to_warm_users, backfill_ratio)
+         cold_to_warm_users, backfill_ratio,
+         recommend_latency_p50_ms, recommend_latency_p95_ms)
     VALUES (:d, :imp, :ai, :clk, :ac, :ctr, :a_ctr, :on_ctr, :non_ctr,
-            :per_cat, :per_pos, :div, :fresh, :ba, :ad, :ps, :c2w, :bf)
+            :per_cat, :per_pos, :div, :fresh, :ba, :ad, :ps, :c2w, :bf,
+            :lp50, :lp95)
     ON DUPLICATE KEY UPDATE
         impressions = VALUES(impressions),
         anonymous_impressions = VALUES(anonymous_impressions),
@@ -386,7 +405,9 @@ def rollup(conn, config: Dict) -> Dict:
         anonymous_active_devices = VALUES(anonymous_active_devices),
         pool_size = VALUES(pool_size),
         cold_to_warm_users = VALUES(cold_to_warm_users),
-        backfill_ratio = VALUES(backfill_ratio)
+        backfill_ratio = VALUES(backfill_ratio),
+        recommend_latency_p50_ms = VALUES(recommend_latency_p50_ms),
+        recommend_latency_p95_ms = VALUES(recommend_latency_p95_ms)
     """
     with conn.engine.connect() as c:
         with c.begin():
@@ -409,6 +430,8 @@ def rollup(conn, config: Dict) -> Dict:
                 "ps": pool_size,
                 "c2w": cold_to_warm,
                 "bf": backfill_ratio_v,
+                "lp50": latency_p50_v,
+                "lp95": latency_p95_v,
             })
 
     payload.update({
