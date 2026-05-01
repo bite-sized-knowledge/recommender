@@ -26,6 +26,7 @@ def _fetch_articles(conn, recency_days: int) -> pl.DataFrame:
     SELECT
         CAST(a.article_id AS CHAR)              AS article_id,
         a.category_id                            AS category_id,
+        a.lang                                    AS lang,
         a.published_at                           AS published_at,
         COALESCE(a.quality_score, 5)             AS quality_score,
         COALESCE(a.like_count, 0)                AS like_count,
@@ -99,7 +100,7 @@ def _compute_scores(df: pl.DataFrame, half_life_days: float, weights: Dict[str, 
     ])
 
     return (
-        df.select(["article_id", "category_id", "score", "freshness", "quality_norm", "popularity_norm", "days_old"])
+        df.select(["article_id", "category_id", "lang", "score", "freshness", "quality_norm", "popularity_norm", "days_old"])
         .drop_nulls(subset=["score", "category_id", "article_id"])
     )
 
@@ -143,14 +144,15 @@ def _swap_pool(conn, df: pl.DataFrame) -> int:
             "score": float(r["score"]),
             "rank_global": int(r["rank_global"]),
             "category_id": int(r["category_id"]) if r["category_id"] is not None else None,
+            "lang": str(r["lang"]) if r.get("lang") else None,
         }
         for r in df.iter_rows(named=True)
     ]
 
     insert_sql = """
         INSERT INTO recommendation_global
-            (article_id, score, rank_global, category_id, generated_at)
-        VALUES (:article_id, :score, :rank_global, :category_id, NOW())
+            (article_id, score, rank_global, category_id, lang, generated_at)
+        VALUES (:article_id, :score, :rank_global, :category_id, :lang, NOW())
     """
 
     with conn.engine.connect() as c:
